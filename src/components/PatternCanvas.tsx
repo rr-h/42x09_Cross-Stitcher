@@ -1,14 +1,14 @@
-import { useRef, useEffect, useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useGameStore } from '../store';
-import { renderCanvas } from '../utils/renderer';
-import {
-  screenToGrid,
-  clampViewport,
-  calculateFitViewport,
-  gridToWorld,
-} from '../utils/coordinates';
-import type { ViewportTransform, GridCell } from '../types';
+import type { GridCell, ViewportTransform } from '../types';
 import { StitchState } from '../types';
+import {
+  calculateFitViewport,
+  clampViewport,
+  gridToWorld,
+  screenToGrid,
+} from '../utils/coordinates';
+import { renderCanvas } from '../utils/renderer';
 
 type DragMode = 'none' | 'stitch' | 'pan';
 
@@ -23,8 +23,29 @@ interface DragState {
   visitedCells: Set<string>;
 }
 
+interface PinchState {
+  isPinching: boolean;
+  initialDistance: number;
+  initialScale: number;
+  centerX: number;
+  centerY: number;
+}
+
 function cellKey(col: number, row: number): string {
   return `${col},${row}`;
+}
+
+function getTouchDistance(touches: React.TouchList): number {
+  const dx = touches[0].clientX - touches[1].clientX;
+  const dy = touches[0].clientY - touches[1].clientY;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+function getTouchCenter(touches: React.TouchList, rect: DOMRect): { x: number; y: number } {
+  return {
+    x: (touches[0].clientX + touches[1].clientX) / 2 - rect.left,
+    y: (touches[0].clientY + touches[1].clientY) / 2 - rect.top,
+  };
 }
 
 export function PatternCanvas() {
@@ -40,6 +61,13 @@ export function PatternCanvas() {
     startTranslateY: 0,
     lastCell: null,
     visitedCells: new Set(),
+  });
+  const pinchStateRef = useRef<PinchState>({
+    isPinching: false,
+    initialDistance: 0,
+    initialScale: 1,
+    centerX: 0,
+    centerY: 0,
   });
 
   const pattern = useGameStore(s => s.pattern);
@@ -110,133 +138,170 @@ export function PatternCanvas() {
       canvasWidth: size.width,
       canvasHeight: size.height,
     });
-  }, [pattern, progress?.stitchedState, progress?.placedColors, viewport, size, selectedPaletteIndex]);
+  }, [
+    pattern,
+    progress?.stitchedState,
+    progress?.placedColors,
+    viewport,
+    size,
+    selectedPaletteIndex,
+  ]);
 
   // Try to place stitch at cell, returns true if stitch was placed
-  const tryPlaceStitch = useCallback((col: number, row: number): boolean => {
-    if (!pattern || isComplete || selectedPaletteIndex === null) return false;
-    if (col < 0 || col >= pattern.width || row < 0 || row >= pattern.height) return false;
+  const tryPlaceStitch = useCallback(
+    (col: number, row: number): boolean => {
+      if (!pattern || isComplete || selectedPaletteIndex === null) return false;
+      if (col < 0 || col >= pattern.width || row < 0 || row >= pattern.height) return false;
 
-    const state = getStitchState(col, row);
-    if (state !== StitchState.None) return false; // Already stitched
+      const state = getStitchState(col, row);
+      if (state !== StitchState.None) return false; // Already stitched
 
-    if (toolMode === 'stitch') {
-      placeStitch(col, row);
-      return true;
-    }
-    return false;
-  }, [pattern, isComplete, selectedPaletteIndex, toolMode, getStitchState, placeStitch]);
+      if (toolMode === 'stitch') {
+        placeStitch(col, row);
+        return true;
+      }
+      return false;
+    },
+    [pattern, isComplete, selectedPaletteIndex, toolMode, getStitchState, placeStitch]
+  );
 
   // Handle pointer down
-  const handlePointerDown = useCallback((e: React.PointerEvent) => {
-    const rect = canvasRef.current?.getBoundingClientRect();
-    if (!rect || !pattern || !progress) return;
+  const handlePointerDown = useCallback(
+    (e: React.PointerEvent) => {
+      const rect = canvasRef.current?.getBoundingClientRect();
+      if (!rect || !pattern || !progress) return;
 
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    const cell = screenToGrid(x, y, viewport);
-
-    // Determine drag mode based on what's under the cursor
-    let mode: DragMode = 'none';
-
-    if (cell.col >= 0 && cell.col < pattern.width && cell.row >= 0 && cell.row < pattern.height) {
-      const state = getStitchState(cell.col, cell.row);
-      const targetIdx = getTargetPaletteIndex(cell.col, cell.row);
-
-      if (toolMode === 'picker') {
-        // Picker mode - just handle clicks, no drag stitching
-        if (state === StitchState.Wrong) {
-          removeWrongStitch(cell.col, cell.row);
-        }
-        mode = 'pan';
-      } else if (toolMode === 'fill') {
-        // Fill mode - flood fill all connected cells of the same color
-        if (state === StitchState.None && selectedPaletteIndex !== null && targetIdx === selectedPaletteIndex) {
-          floodFillStitch(cell.col, cell.row);
-        }
-        mode = 'pan';
-      } else if (state === StitchState.None && selectedPaletteIndex !== null) {
-        // Unstitched cell with palette selected - start stitch painting
-        mode = 'stitch';
-        tryPlaceStitch(cell.col, cell.row);
-      } else {
-        // Stitched cell or no palette selected - pan mode
-        mode = 'pan';
-      }
-    } else {
-      // Outside pattern bounds - pan mode
-      mode = 'pan';
-    }
-
-    dragStateRef.current = {
-      isDragging: true,
-      mode,
-      startX: e.clientX,
-      startY: e.clientY,
-      startTranslateX: viewport.translateX,
-      startTranslateY: viewport.translateY,
-      lastCell: cell,
-      visitedCells: new Set([cellKey(cell.col, cell.row)]),
-    };
-
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
-  }, [pattern, progress, viewport, toolMode, selectedPaletteIndex, getStitchState, getTargetPaletteIndex, tryPlaceStitch, floodFillStitch, removeWrongStitch]);
-
-  // Handle pointer move
-  const handlePointerMove = useCallback((e: React.PointerEvent) => {
-    const dragState = dragStateRef.current;
-    if (!dragState.isDragging || !pattern) return;
-
-    const rect = canvasRef.current?.getBoundingClientRect();
-    if (!rect) return;
-
-    if (dragState.mode === 'stitch') {
-      // Stitch painting mode - place stitches as we drag
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
       const cell = screenToGrid(x, y, viewport);
 
-      const key = cellKey(cell.col, cell.row);
-      if (!dragState.visitedCells.has(key)) {
-        dragState.visitedCells.add(key);
+      // Determine drag mode based on what's under the cursor
+      let mode: DragMode = 'none';
 
-        // Interpolate between last cell and current cell to not miss any
-        if (dragState.lastCell) {
-          const dx = cell.col - dragState.lastCell.col;
-          const dy = cell.row - dragState.lastCell.row;
-          const steps = Math.max(Math.abs(dx), Math.abs(dy));
+      if (cell.col >= 0 && cell.col < pattern.width && cell.row >= 0 && cell.row < pattern.height) {
+        const state = getStitchState(cell.col, cell.row);
+        const targetIdx = getTargetPaletteIndex(cell.col, cell.row);
 
-          if (steps > 1) {
-            for (let i = 1; i < steps; i++) {
-              const interpCol = Math.round(dragState.lastCell.col + (dx * i) / steps);
-              const interpRow = Math.round(dragState.lastCell.row + (dy * i) / steps);
-              const interpKey = cellKey(interpCol, interpRow);
-              if (!dragState.visitedCells.has(interpKey)) {
-                dragState.visitedCells.add(interpKey);
-                tryPlaceStitch(interpCol, interpRow);
+        if (toolMode === 'picker') {
+          // Picker mode - just handle clicks, no drag stitching
+          if (state === StitchState.Wrong) {
+            removeWrongStitch(cell.col, cell.row);
+          }
+          mode = 'pan';
+        } else if (toolMode === 'fill') {
+          // Fill mode - flood fill all connected cells of the same color
+          if (
+            state === StitchState.None &&
+            selectedPaletteIndex !== null &&
+            targetIdx === selectedPaletteIndex
+          ) {
+            floodFillStitch(cell.col, cell.row);
+          }
+          mode = 'pan';
+        } else if (state === StitchState.None && selectedPaletteIndex !== null) {
+          // Unstitched cell with palette selected - start stitch painting
+          mode = 'stitch';
+          tryPlaceStitch(cell.col, cell.row);
+        } else {
+          // Stitched cell or no palette selected - pan mode
+          mode = 'pan';
+        }
+      } else {
+        // Outside pattern bounds - pan mode
+        mode = 'pan';
+      }
+
+      dragStateRef.current = {
+        isDragging: true,
+        mode,
+        startX: e.clientX,
+        startY: e.clientY,
+        startTranslateX: viewport.translateX,
+        startTranslateY: viewport.translateY,
+        lastCell: cell,
+        visitedCells: new Set([cellKey(cell.col, cell.row)]),
+      };
+
+      (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    },
+    [
+      pattern,
+      progress,
+      viewport,
+      toolMode,
+      selectedPaletteIndex,
+      getStitchState,
+      getTargetPaletteIndex,
+      tryPlaceStitch,
+      floodFillStitch,
+      removeWrongStitch,
+    ]
+  );
+
+  // Handle pointer move
+  const handlePointerMove = useCallback(
+    (e: React.PointerEvent) => {
+      const dragState = dragStateRef.current;
+      if (!dragState.isDragging || !pattern) return;
+
+      const rect = canvasRef.current?.getBoundingClientRect();
+      if (!rect) return;
+
+      if (dragState.mode === 'stitch') {
+        // Stitch painting mode - place stitches as we drag
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        const cell = screenToGrid(x, y, viewport);
+
+        const key = cellKey(cell.col, cell.row);
+        if (!dragState.visitedCells.has(key)) {
+          dragState.visitedCells.add(key);
+
+          // Interpolate between last cell and current cell to not miss any
+          if (dragState.lastCell) {
+            const dx = cell.col - dragState.lastCell.col;
+            const dy = cell.row - dragState.lastCell.row;
+            const steps = Math.max(Math.abs(dx), Math.abs(dy));
+
+            if (steps > 1) {
+              for (let i = 1; i < steps; i++) {
+                const interpCol = Math.round(dragState.lastCell.col + (dx * i) / steps);
+                const interpRow = Math.round(dragState.lastCell.row + (dy * i) / steps);
+                const interpKey = cellKey(interpCol, interpRow);
+                if (!dragState.visitedCells.has(interpKey)) {
+                  dragState.visitedCells.add(interpKey);
+                  tryPlaceStitch(interpCol, interpRow);
+                }
               }
             }
           }
+
+          tryPlaceStitch(cell.col, cell.row);
+          dragState.lastCell = cell;
         }
+      } else if (dragState.mode === 'pan') {
+        // Pan mode
+        const dx = e.clientX - dragState.startX;
+        const dy = e.clientY - dragState.startY;
 
-        tryPlaceStitch(cell.col, cell.row);
-        dragState.lastCell = cell;
+        const newViewport: ViewportTransform = {
+          scale: viewport.scale,
+          translateX: dragState.startTranslateX + dx,
+          translateY: dragState.startTranslateY + dy,
+        };
+
+        const clamped = clampViewport(
+          newViewport,
+          pattern.width,
+          pattern.height,
+          size.width,
+          size.height
+        );
+        setViewport(clamped);
       }
-    } else if (dragState.mode === 'pan') {
-      // Pan mode
-      const dx = e.clientX - dragState.startX;
-      const dy = e.clientY - dragState.startY;
-
-      const newViewport: ViewportTransform = {
-        scale: viewport.scale,
-        translateX: dragState.startTranslateX + dx,
-        translateY: dragState.startTranslateY + dy,
-      };
-
-      const clamped = clampViewport(newViewport, pattern.width, pattern.height, size.width, size.height);
-      setViewport(clamped);
-    }
-  }, [pattern, viewport, size, setViewport, tryPlaceStitch]);
+    },
+    [pattern, viewport, size, setViewport, tryPlaceStitch]
+  );
 
   // Handle pointer up
   const handlePointerUp = useCallback((e: React.PointerEvent) => {
@@ -249,55 +314,150 @@ export function PatternCanvas() {
   }, []);
 
   // Handle wheel zoom
-  const handleWheel = useCallback((e: React.WheelEvent) => {
-    e.preventDefault();
-    if (!pattern) return;
+  const handleWheel = useCallback(
+    (e: React.WheelEvent) => {
+      e.preventDefault();
+      if (!pattern) return;
 
-    const rect = canvasRef.current?.getBoundingClientRect();
-    if (!rect) return;
+      const rect = canvasRef.current?.getBoundingClientRect();
+      if (!rect) return;
 
-    const mouseX = e.clientX - rect.left;
-    const mouseY = e.clientY - rect.top;
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
 
-    // Calculate zoom
-    const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
-    const newScale = viewport.scale * zoomFactor;
+      // Calculate zoom
+      const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
+      const newScale = viewport.scale * zoomFactor;
 
-    // Zoom towards mouse position
-    const newTranslateX = mouseX - (mouseX - viewport.translateX) * zoomFactor;
-    const newTranslateY = mouseY - (mouseY - viewport.translateY) * zoomFactor;
+      // Zoom towards mouse position
+      const newTranslateX = mouseX - (mouseX - viewport.translateX) * zoomFactor;
+      const newTranslateY = mouseY - (mouseY - viewport.translateY) * zoomFactor;
 
-    const newViewport: ViewportTransform = {
-      scale: newScale,
-      translateX: newTranslateX,
-      translateY: newTranslateY,
-    };
+      const newViewport: ViewportTransform = {
+        scale: newScale,
+        translateX: newTranslateX,
+        translateY: newTranslateY,
+      };
 
-    const clamped = clampViewport(newViewport, pattern.width, pattern.height, size.width, size.height);
-    setViewport(clamped);
-  }, [pattern, viewport, size, setViewport]);
+      const clamped = clampViewport(
+        newViewport,
+        pattern.width,
+        pattern.height,
+        size.width,
+        size.height
+      );
+      setViewport(clamped);
+    },
+    [pattern, viewport, size, setViewport]
+  );
+
+  // Handle touch start for pinch-to-zoom
+  const handleTouchStart = useCallback(
+    (e: React.TouchEvent) => {
+      if (e.touches.length === 2 && pattern) {
+        e.preventDefault();
+        const rect = canvasRef.current?.getBoundingClientRect();
+        if (!rect) return;
+
+        const center = getTouchCenter(e.touches, rect);
+        pinchStateRef.current = {
+          isPinching: true,
+          initialDistance: getTouchDistance(e.touches),
+          initialScale: viewport.scale,
+          centerX: center.x,
+          centerY: center.y,
+        };
+
+        // Stop any pointer drag
+        dragStateRef.current.isDragging = false;
+        dragStateRef.current.mode = 'none';
+      }
+    },
+    [pattern, viewport.scale]
+  );
+
+  // Handle touch move for pinch-to-zoom
+  const handleTouchMove = useCallback(
+    (e: React.TouchEvent) => {
+      const pinchState = pinchStateRef.current;
+      if (!pinchState.isPinching || e.touches.length !== 2 || !pattern) return;
+
+      e.preventDefault();
+      const rect = canvasRef.current?.getBoundingClientRect();
+      if (!rect) return;
+
+      const currentDistance = getTouchDistance(e.touches);
+      const currentCenter = getTouchCenter(e.touches, rect);
+      const scaleFactor = currentDistance / pinchState.initialDistance;
+      const newScale = pinchState.initialScale * scaleFactor;
+
+      // Zoom towards pinch center
+      const zoomFactor = newScale / viewport.scale;
+      const newTranslateX =
+        currentCenter.x - (pinchState.centerX - viewport.translateX) * zoomFactor;
+      const newTranslateY =
+        currentCenter.y - (pinchState.centerY - viewport.translateY) * zoomFactor;
+
+      const newViewport: ViewportTransform = {
+        scale: newScale,
+        translateX: newTranslateX,
+        translateY: newTranslateY,
+      };
+
+      const clamped = clampViewport(
+        newViewport,
+        pattern.width,
+        pattern.height,
+        size.width,
+        size.height
+      );
+      setViewport(clamped);
+
+      // Update pinch center for smooth panning while zooming
+      pinchStateRef.current.centerX = currentCenter.x;
+      pinchStateRef.current.centerY = currentCenter.y;
+    },
+    [pattern, viewport, size, setViewport]
+  );
+
+  // Handle touch end for pinch-to-zoom
+  const handleTouchEnd = useCallback((e: React.TouchEvent) => {
+    if (e.touches.length < 2) {
+      pinchStateRef.current.isPinching = false;
+    }
+  }, []);
 
   // Navigate to cell
-  const navigateToCell = useCallback((cell: GridCell) => {
-    if (!pattern) return;
+  const navigateToCell = useCallback(
+    (cell: GridCell) => {
+      if (!pattern) return;
 
-    const targetWorld = gridToWorld(cell.col + 0.5, cell.row + 0.5);
-    const newTranslateX = size.width / 2 - targetWorld.x * viewport.scale;
-    const newTranslateY = size.height / 2 - targetWorld.y * viewport.scale;
+      const targetWorld = gridToWorld(cell.col + 0.5, cell.row + 0.5);
+      const newTranslateX = size.width / 2 - targetWorld.x * viewport.scale;
+      const newTranslateY = size.height / 2 - targetWorld.y * viewport.scale;
 
-    const newViewport: ViewportTransform = {
-      scale: viewport.scale,
-      translateX: newTranslateX,
-      translateY: newTranslateY,
-    };
+      const newViewport: ViewportTransform = {
+        scale: viewport.scale,
+        translateX: newTranslateX,
+        translateY: newTranslateY,
+      };
 
-    const clamped = clampViewport(newViewport, pattern.width, pattern.height, size.width, size.height);
-    setViewport(clamped);
-  }, [pattern, viewport.scale, size, setViewport]);
+      const clamped = clampViewport(
+        newViewport,
+        pattern.width,
+        pattern.height,
+        size.width,
+        size.height
+      );
+      setViewport(clamped);
+    },
+    [pattern, viewport.scale, size, setViewport]
+  );
 
   // Expose navigation method for palette clicks
   useEffect(() => {
-    (window as unknown as { navigateToCell: (cell: GridCell) => void }).navigateToCell = navigateToCell;
+    (window as unknown as { navigateToCell: (cell: GridCell) => void }).navigateToCell =
+      navigateToCell;
   }, [navigateToCell]);
 
   // Get cursor style
@@ -354,6 +514,9 @@ export function PatternCanvas() {
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
         onWheel={handleWheel}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
       />
 
       {showCelebration && (
@@ -369,35 +532,45 @@ export function PatternCanvas() {
             justifyContent: 'center',
             backgroundColor: 'rgba(0, 0, 0, 0.6)',
             zIndex: 100,
+            padding: '1rem',
           }}
           onClick={closeCelebration}
         >
           <div
             style={{
               backgroundColor: 'white',
-              padding: '2rem 3rem',
+              padding: '1.5rem 2rem',
               borderRadius: '1rem',
               textAlign: 'center',
               boxShadow: '0 4px 20px rgba(0, 0, 0, 0.3)',
+              maxWidth: '90vw',
+              width: '400px',
             }}
           >
-            <h2 style={{ fontSize: '2rem', marginBottom: '1rem', color: '#2D5A27' }}>
-              Congratulations!
+            <h2
+              style={{
+                fontSize: 'clamp(1.25rem, 5vw, 2rem)',
+                marginBottom: '0.75rem',
+                color: '#2D5A27',
+              }}
+            >
+              🎉 Congratulations! 🎉
             </h2>
-            <p style={{ fontSize: '1.2rem', color: '#666' }}>
+            <p style={{ fontSize: 'clamp(0.9rem, 3vw, 1.2rem)', color: '#666' }}>
               You completed the pattern!
             </p>
             <button
               onClick={closeCelebration}
               style={{
-                marginTop: '1.5rem',
-                padding: '0.75rem 2rem',
-                fontSize: '1rem',
+                marginTop: '1.25rem',
+                padding: '0.625rem 1.5rem',
+                fontSize: 'clamp(0.875rem, 3vw, 1rem)',
                 backgroundColor: '#2D5A27',
                 color: 'white',
                 border: 'none',
                 borderRadius: '0.5rem',
                 cursor: 'pointer',
+                minWidth: '120px',
               }}
             >
               Close

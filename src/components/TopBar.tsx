@@ -1,8 +1,8 @@
 import { useRef } from 'react';
-import { useGameStore } from '../store';
 import { parsePatternFile } from '../parsers';
-import { calculateFitViewport, clampViewport } from '../utils/coordinates';
+import { useGameStore } from '../store';
 import type { ViewportTransform } from '../types';
+import { calculateFitViewport, clampViewport } from '../utils/coordinates';
 
 export function TopBar() {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -45,7 +45,13 @@ export function TopBar() {
       translateY: canvas.height / 2 - (canvas.height / 2 - viewport.translateY) * 1.25,
     };
 
-    const clamped = clampViewport(newViewport, pattern.width, pattern.height, canvas.width, canvas.height);
+    const clamped = clampViewport(
+      newViewport,
+      pattern.width,
+      pattern.height,
+      canvas.width,
+      canvas.height
+    );
     setViewport(clamped);
   };
 
@@ -60,7 +66,13 @@ export function TopBar() {
       translateY: canvas.height / 2 - (canvas.height / 2 - viewport.translateY) / 1.25,
     };
 
-    const clamped = clampViewport(newViewport, pattern.width, pattern.height, canvas.width, canvas.height);
+    const clamped = clampViewport(
+      newViewport,
+      pattern.width,
+      pattern.height,
+      canvas.width,
+      canvas.height
+    );
     setViewport(clamped);
   };
 
@@ -87,8 +99,8 @@ export function TopBar() {
   }
 
   return (
-    <div style={styles.container}>
-      <div style={styles.left}>
+    <div className="topbar">
+      <div className="topbar-left">
         <input
           ref={fileInputRef}
           type="file"
@@ -99,24 +111,26 @@ export function TopBar() {
         />
         <button
           onClick={() => fileInputRef.current?.click()}
+          className="import-button"
           style={styles.button}
         >
-          Import Pattern
+          Import
         </button>
 
         {pattern && (
-          <span style={styles.title}>
+          <span className="topbar-title">
             {pattern.meta.title || 'Untitled'} ({pattern.width}x{pattern.height})
           </span>
         )}
       </div>
 
-      <div style={styles.center}>
+      <div className="topbar-center">
         {pattern && (
           <>
-            <div style={styles.toolGroup}>
+            <div className="tool-group">
               <button
                 onClick={() => setToolMode('stitch')}
+                className="tool-button"
                 style={{
                   ...styles.toolButton,
                   backgroundColor: toolMode === 'stitch' ? '#2D5A27' : '#f0f0f0',
@@ -128,6 +142,7 @@ export function TopBar() {
               </button>
               <button
                 onClick={() => setToolMode('fill')}
+                className="tool-button"
                 style={{
                   ...styles.toolButton,
                   backgroundColor: toolMode === 'fill' ? '#2D5A27' : '#f0f0f0',
@@ -139,6 +154,7 @@ export function TopBar() {
               </button>
               <button
                 onClick={() => setToolMode('picker')}
+                className="tool-button"
                 style={{
                   ...styles.toolButton,
                   backgroundColor: toolMode === 'picker' ? '#2D5A27' : '#f0f0f0',
@@ -149,19 +165,27 @@ export function TopBar() {
                 Picker
               </button>
             </div>
-            <div style={styles.separator} />
-            <button onClick={handleZoomOut} style={styles.zoomButton}>-</button>
-            <span style={styles.zoomLevel}>{Math.round(viewport.scale * 100)}%</span>
-            <button onClick={handleZoomIn} style={styles.zoomButton}>+</button>
-            <button onClick={handleFit} style={styles.fitButton}>Fit</button>
+            <div className="separator" style={styles.separator} />
+            <button onClick={handleZoomOut} className="zoom-button" style={styles.zoomButton}>
+              -
+            </button>
+            <span className="zoom-level" style={styles.zoomLevel}>
+              {Math.round(viewport.scale * 100)}%
+            </span>
+            <button onClick={handleZoomIn} className="zoom-button" style={styles.zoomButton}>
+              +
+            </button>
+            <button onClick={handleFit} className="fit-button" style={styles.fitButton}>
+              Fit
+            </button>
           </>
         )}
       </div>
 
-      <div style={styles.right}>
+      <div className="topbar-right">
         {pattern && (
           <>
-            <div style={styles.progressContainer}>
+            <div className="progress-container">
               <div
                 style={{
                   ...styles.progressBar,
@@ -170,7 +194,7 @@ export function TopBar() {
                 }}
               />
             </div>
-            <span style={styles.progressText}>
+            <span className="progress-text" style={styles.progressText}>
               {isComplete ? 'Complete!' : `${progressPercent}%`}
             </span>
           </>
@@ -181,30 +205,6 @@ export function TopBar() {
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  container: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: '0.75rem 1rem',
-    backgroundColor: '#fff',
-    borderBottom: '1px solid #ddd',
-    gap: '1rem',
-  },
-  left: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '1rem',
-  },
-  center: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '0.5rem',
-  },
-  right: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '1rem',
-  },
   button: {
     padding: '0.5rem 1rem',
     backgroundColor: '#2D5A27',
@@ -214,10 +214,6 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: 'pointer',
     fontWeight: '500',
     fontSize: '0.9rem',
-  },
-  title: {
-    fontSize: '0.9rem',
-    color: '#666',
   },
   zoomButton: {
     width: '32px',
@@ -246,10 +242,6 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: 'pointer',
     fontSize: '0.85rem',
   },
-  toolGroup: {
-    display: 'flex',
-    gap: '0.25rem',
-  },
   toolButton: {
     padding: '0.375rem 0.75rem',
     border: '1px solid #ddd',
@@ -264,13 +256,6 @@ const styles: Record<string, React.CSSProperties> = {
     height: '24px',
     backgroundColor: '#ddd',
     margin: '0 0.5rem',
-  },
-  progressContainer: {
-    width: '100px',
-    height: '8px',
-    backgroundColor: '#e0e0e0',
-    borderRadius: '4px',
-    overflow: 'hidden',
   },
   progressBar: {
     height: '100%',

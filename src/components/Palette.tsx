@@ -1,6 +1,7 @@
+import type React from 'react';
 import { useGameStore } from '../store';
-import { getViewportCenterInGrid } from '../utils/coordinates';
 import type { GridCell } from '../types';
+import { getViewportCenterInGrid } from '../utils/coordinates';
 
 export function Palette() {
   const pattern = useGameStore(s => s.pattern);
@@ -16,8 +17,10 @@ export function Palette() {
 
   if (!pattern || !progress) {
     return (
-      <div style={styles.container}>
-        <div style={styles.header}>Palette</div>
+      <div className="palette-container">
+        <div className="palette-header" style={styles.header}>
+          Palette
+        </div>
         <div style={styles.empty}>No pattern loaded</div>
       </div>
     );
@@ -46,7 +49,8 @@ export function Palette() {
 
     if (nearest) {
       // Navigate to that cell
-      const navigateToCell = (window as unknown as { navigateToCell: (cell: GridCell) => void }).navigateToCell;
+      const navigateToCell = (window as unknown as { navigateToCell: (cell: GridCell) => void })
+        .navigateToCell;
       if (navigateToCell) {
         navigateToCell(nearest);
       }
@@ -54,12 +58,15 @@ export function Palette() {
   };
 
   return (
-    <div style={styles.container}>
-      <div style={styles.header}>Palette</div>
+    <div className="palette-container">
+      <div className="palette-header" style={styles.header}>
+        Palette
+      </div>
 
       {wrongCount > 0 && (
         <button
           onClick={() => setToolMode(toolMode === 'picker' ? 'stitch' : 'picker')}
+          className="picker-button"
           style={{
             ...styles.pickerButton,
             ...(toolMode === 'picker' ? styles.pickerButtonActive : {}),
@@ -70,7 +77,7 @@ export function Palette() {
         </button>
       )}
 
-      <div style={styles.list}>
+      <div className="palette-list" style={styles.list}>
         {visiblePalette.map(entry => {
           const remaining = progress.paletteCounts[entry.paletteIndex].remainingTargets;
           const isSelected = selectedPaletteIndex === entry.paletteIndex && toolMode === 'stitch';
@@ -79,46 +86,42 @@ export function Palette() {
             <button
               key={entry.paletteId}
               onClick={() => handlePaletteClick(entry.paletteIndex)}
+              className="palette-tile"
               style={{
                 ...styles.tile,
                 ...(isSelected ? styles.tileSelected : {}),
               }}
             >
               <div
+                className="palette-swatch"
                 style={{
                   ...styles.swatch,
                   backgroundColor: entry.hex,
                 }}
               />
-              <div style={styles.symbol}>{entry.symbol}</div>
+              <div className="palette-symbol" style={styles.symbol}>
+                {entry.symbol}
+              </div>
               <div style={styles.info}>
                 <div style={styles.name}>{entry.name}</div>
                 <div style={styles.code}>
                   {entry.brand && entry.code ? `${entry.brand} ${entry.code}` : entry.code || ''}
                 </div>
               </div>
-              <div style={styles.count}>{remaining}</div>
+              <div className="palette-count" style={styles.count}>
+                {remaining}
+              </div>
             </button>
           );
         })}
 
-        {visiblePalette.length === 0 && (
-          <div style={styles.allComplete}>All colors completed!</div>
-        )}
+        {visiblePalette.length === 0 && <div style={styles.allComplete}>All colors completed!</div>}
       </div>
     </div>
   );
 }
 
 const styles: Record<string, React.CSSProperties> = {
-  container: {
-    width: '280px',
-    backgroundColor: '#fff',
-    borderLeft: '1px solid #ddd',
-    display: 'flex',
-    flexDirection: 'column',
-    overflow: 'hidden',
-  },
   header: {
     padding: '1rem',
     fontWeight: 'bold',

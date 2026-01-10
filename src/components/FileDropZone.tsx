@@ -1,6 +1,6 @@
-import { useState, useCallback } from 'react';
-import { useGameStore } from '../store';
+import { useCallback, useState } from 'react';
 import { parsePatternFile } from '../parsers';
+import { useGameStore } from '../store';
 
 interface FileDropZoneProps {
   children: React.ReactNode;
@@ -23,28 +23,31 @@ export function FileDropZone({ children }: FileDropZoneProps) {
     setIsDragging(false);
   }, []);
 
-  const handleDrop = useCallback(async (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragging(false);
-    setError(null);
+  const handleDrop = useCallback(
+    async (e: React.DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setIsDragging(false);
+      setError(null);
 
-    const file = e.dataTransfer.files[0];
-    if (!file) return;
+      const file = e.dataTransfer.files[0];
+      if (!file) return;
 
-    const filename = file.name.toLowerCase();
-    if (!filename.endsWith('.oxs') && !filename.endsWith('.fcjson')) {
-      setError('Unsupported file format. Please use .oxs or .fcjson files.');
-      return;
-    }
+      const filename = file.name.toLowerCase();
+      if (!filename.endsWith('.oxs') && !filename.endsWith('.fcjson')) {
+        setError('Unsupported file format. Please use .oxs or .fcjson files.');
+        return;
+      }
 
-    try {
-      const patternDoc = await parsePatternFile(file);
-      await loadPattern(patternDoc);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to parse file');
-    }
-  }, [loadPattern]);
+      try {
+        const patternDoc = await parsePatternFile(file);
+        await loadPattern(patternDoc);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to parse file');
+      }
+    },
+    [loadPattern]
+  );
 
   const dismissError = () => setError(null);
 
@@ -94,27 +97,30 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 1000,
+    padding: '1rem',
   },
   dropTarget: {
-    padding: '3rem',
+    padding: 'clamp(1.5rem, 5vw, 3rem)',
     backgroundColor: 'white',
     borderRadius: '1rem',
     textAlign: 'center',
     border: '3px dashed #2D5A27',
+    maxWidth: '90vw',
+    width: '400px',
   },
   dropIcon: {
-    fontSize: '4rem',
+    fontSize: 'clamp(2.5rem, 8vw, 4rem)',
     color: '#2D5A27',
     marginBottom: '1rem',
   },
   dropText: {
-    fontSize: '1.5rem',
+    fontSize: 'clamp(1rem, 4vw, 1.5rem)',
     fontWeight: 'bold',
     color: '#333',
     marginBottom: '0.5rem',
   },
   dropHint: {
-    fontSize: '1rem',
+    fontSize: 'clamp(0.875rem, 3vw, 1rem)',
     color: '#666',
   },
   errorOverlay: {
@@ -128,33 +134,37 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 1000,
+    padding: '1rem',
   },
   errorBox: {
-    padding: '2rem',
+    padding: 'clamp(1rem, 4vw, 2rem)',
     backgroundColor: 'white',
     borderRadius: '0.5rem',
     textAlign: 'center',
-    maxWidth: '400px',
+    maxWidth: '90vw',
+    width: '400px',
     boxShadow: '0 4px 20px rgba(0, 0, 0, 0.3)',
   },
   errorTitle: {
-    fontSize: '1.25rem',
+    fontSize: 'clamp(1rem, 4vw, 1.25rem)',
     fontWeight: 'bold',
     color: '#c0392b',
-    marginBottom: '1rem',
+    marginBottom: '0.75rem',
   },
   errorMessage: {
-    fontSize: '1rem',
+    fontSize: 'clamp(0.875rem, 3vw, 1rem)',
     color: '#333',
-    marginBottom: '1.5rem',
+    marginBottom: '1rem',
+    wordBreak: 'break-word',
   },
   errorButton: {
-    padding: '0.5rem 2rem',
+    padding: '0.5rem 1.5rem',
     backgroundColor: '#c0392b',
     color: 'white',
     border: 'none',
     borderRadius: '0.25rem',
     cursor: 'pointer',
-    fontSize: '1rem',
+    fontSize: 'clamp(0.875rem, 3vw, 1rem)',
+    minWidth: '100px',
   },
 };
