@@ -1,6 +1,8 @@
 import { useCallback, useState } from 'react';
 import { parsePatternFile } from '../parsers';
 import { useGameStore } from '../store';
+import { isImageFile } from '../converters/imageToPattern';
+import { ImageImportModal } from './ImageImportModal';
 
 interface FileDropZoneProps {
   children: React.ReactNode;
@@ -9,6 +11,7 @@ interface FileDropZoneProps {
 export function FileDropZone({ children }: FileDropZoneProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [imageFile, setImageFile] = useState<File | null>(null);
   const loadPattern = useGameStore(s => s.loadPattern);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -33,9 +36,15 @@ export function FileDropZone({ children }: FileDropZoneProps) {
       const file = e.dataTransfer.files[0];
       if (!file) return;
 
+      // Check if it's an image file
+      if (isImageFile(file)) {
+        setImageFile(file);
+        return;
+      }
+
       const filename = file.name.toLowerCase();
       if (!filename.endsWith('.oxs') && !filename.endsWith('.fcjson')) {
-        setError('Unsupported file format. Please use .oxs or .fcjson files.');
+        setError('Unsupported file format. Please use .oxs, .fcjson, or image files (PNG, JPG, etc.).');
         return;
       }
 
@@ -48,6 +57,10 @@ export function FileDropZone({ children }: FileDropZoneProps) {
     },
     [loadPattern]
   );
+
+  const handleCloseImageModal = useCallback(() => {
+    setImageFile(null);
+  }, []);
 
   const dismissError = () => setError(null);
 
@@ -64,10 +77,14 @@ export function FileDropZone({ children }: FileDropZoneProps) {
         <div style={styles.overlay}>
           <div style={styles.dropTarget}>
             <div style={styles.dropIcon}>+</div>
-            <div style={styles.dropText}>Drop pattern file here</div>
-            <div style={styles.dropHint}>.oxs or .fcjson</div>
+            <div style={styles.dropText}>Drop file here</div>
+            <div style={styles.dropHint}>.oxs, .fcjson, or image files</div>
           </div>
         </div>
+      )}
+
+      {imageFile && (
+        <ImageImportModal file={imageFile} onClose={handleCloseImageModal} />
       )}
 
       {error && (

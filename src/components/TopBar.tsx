@@ -1,11 +1,15 @@
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import { parsePatternFile } from '../parsers';
 import { useGameStore } from '../store';
 import type { ViewportTransform } from '../types';
 import { calculateFitViewport, clampViewport } from '../utils/coordinates';
+import { isImageFile } from '../converters/imageToPattern';
+import { ImageImportModal } from './ImageImportModal';
 
 export function TopBar() {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const [imageFile, setImageFile] = useState<File | null>(null);
 
   const pattern = useGameStore(s => s.pattern);
   const progress = useGameStore(s => s.progress);
@@ -32,6 +36,27 @@ export function TopBar() {
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
+  };
+
+  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!isImageFile(file)) {
+      alert('Please select a valid image file (PNG, JPG, GIF, WebP, or BMP)');
+      return;
+    }
+
+    setImageFile(file);
+
+    // Reset file input
+    if (imageInputRef.current) {
+      imageInputRef.current.value = '';
+    }
+  };
+
+  const handleCloseImageModal = () => {
+    setImageFile(null);
   };
 
   const handleZoomIn = () => {
@@ -109,12 +134,29 @@ export function TopBar() {
           style={{ display: 'none' }}
           id="file-input"
         />
+        <input
+          ref={imageInputRef}
+          type="file"
+          accept="image/png,image/jpeg,image/gif,image/webp,image/bmp"
+          onChange={handleImageChange}
+          style={{ display: 'none' }}
+          id="image-input"
+        />
         <button
           onClick={() => fileInputRef.current?.click()}
           className="import-button"
           style={styles.button}
+          title="Import .oxs or .fcjson pattern file"
         >
-          Import
+          Import Pattern
+        </button>
+        <button
+          onClick={() => imageInputRef.current?.click()}
+          className="import-image-button"
+          style={styles.imageButton}
+          title="Create pattern from an image"
+        >
+          Import Image
         </button>
 
         {pattern && (
@@ -200,6 +242,10 @@ export function TopBar() {
           </>
         )}
       </div>
+
+      {imageFile && (
+        <ImageImportModal file={imageFile} onClose={handleCloseImageModal} />
+      )}
     </div>
   );
 }
@@ -214,6 +260,17 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: 'pointer',
     fontWeight: '500',
     fontSize: '0.9rem',
+  },
+  imageButton: {
+    padding: '0.5rem 1rem',
+    backgroundColor: '#4A7A45',
+    color: 'white',
+    border: 'none',
+    borderRadius: '0.375rem',
+    cursor: 'pointer',
+    fontWeight: '500',
+    fontSize: '0.9rem',
+    marginLeft: '0.5rem',
   },
   zoomButton: {
     width: '32px',
