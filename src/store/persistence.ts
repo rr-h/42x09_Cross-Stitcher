@@ -1,13 +1,15 @@
 import { openDB, type IDBPDatabase } from 'idb';
 import type { UserProgress, ViewportTransform, PaletteCounts } from '../types';
+import { NO_STITCH } from '../types';
 
 const DB_NAME = 'cross-stitcher-db';
-const DB_VERSION = 1;
+const DB_VERSION = 2; // Bumped version for placedColors addition
 const PROGRESS_STORE = 'progress';
 
 interface PersistedProgress {
   patternId: string;
   stitchedState: number[];
+  placedColors: number[];
   paletteCounts: PaletteCounts[];
   lastSelectedPaletteIndex: number | null;
   viewport: ViewportTransform;
@@ -34,6 +36,7 @@ export async function saveProgress(progress: UserProgress): Promise<void> {
   const persisted: PersistedProgress = {
     patternId: progress.patternId,
     stitchedState: Array.from(progress.stitchedState),
+    placedColors: Array.from(progress.placedColors),
     paletteCounts: progress.paletteCounts,
     lastSelectedPaletteIndex: progress.lastSelectedPaletteIndex,
     viewport: progress.viewport,
@@ -50,9 +53,20 @@ export async function loadProgress(patternId: string): Promise<UserProgress | nu
     return null;
   }
 
+  // Handle migration from old format without placedColors
+  let placedColors: Uint16Array;
+  if (persisted.placedColors) {
+    placedColors = new Uint16Array(persisted.placedColors);
+  } else {
+    // Migrate old progress: assume all stitches were placed with correct color
+    placedColors = new Uint16Array(persisted.stitchedState.length);
+    placedColors.fill(NO_STITCH);
+  }
+
   return {
     patternId: persisted.patternId,
     stitchedState: new Uint8Array(persisted.stitchedState),
+    placedColors,
     paletteCounts: persisted.paletteCounts,
     lastSelectedPaletteIndex: persisted.lastSelectedPaletteIndex,
     viewport: persisted.viewport,

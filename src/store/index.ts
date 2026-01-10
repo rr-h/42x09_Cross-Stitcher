@@ -27,6 +27,7 @@ interface GameState {
   selectPalette: (index: number) => void;
   setToolMode: (mode: ToolMode) => void;
   placeStitch: (col: number, row: number) => void;
+  floodFillStitch: (col: number, row: number) => void;
   removeWrongStitch: (col: number, row: number) => void;
   setViewport: (viewport: ViewportTransform) => void;
   closeCelebration: () => void;
@@ -41,7 +42,11 @@ interface GameState {
 }
 
 function createInitialProgress(pattern: PatternDoc): UserProgress {
-  const stitchedState = new Uint8Array(pattern.width * pattern.height);
+  const size = pattern.width * pattern.height;
+  const stitchedState = new Uint8Array(size);
+  const placedColors = new Uint16Array(size);
+  placedColors.fill(NO_STITCH); // Initialize all to NO_STITCH
+
   const paletteCounts: PaletteCounts[] = pattern.palette.map(p => ({
     remainingTargets: p.totalTargets,
     wrongCount: 0,
@@ -51,6 +56,7 @@ function createInitialProgress(pattern: PatternDoc): UserProgress {
   return {
     patternId: pattern.id,
     stitchedState,
+    placedColors,
     paletteCounts,
     lastSelectedPaletteIndex: null,
     viewport: { scale: 1, translateX: 0, translateY: 0 },
@@ -139,6 +145,10 @@ export const useGameStore = create<GameState>((set, get) => ({
     const newStitchedState = new Uint8Array(progress.stitchedState);
     newStitchedState[cellIndex] = newState;
 
+    // Track the actual color placed
+    const newPlacedColors = new Uint16Array(progress.placedColors);
+    newPlacedColors[cellIndex] = selectedPaletteIndex;
+
     const newPaletteCounts = [...progress.paletteCounts];
 
     if (isCorrect) {
@@ -159,6 +169,93 @@ export const useGameStore = create<GameState>((set, get) => ({
     const updatedProgress: UserProgress = {
       ...progress,
       stitchedState: newStitchedState,
+      placedColors: newPlacedColors,
+      paletteCounts: newPaletteCounts,
+    };
+
+    const isNowComplete = checkCompletion(pattern, newPaletteCounts);
+
+    set({
+      progress: updatedProgress,
+      isComplete: isNowComplete,
+      showCelebration: isNowComplete && !get().isComplete,
+    });
+
+    saveProgress(updatedProgress);
+  },
+
+  floodFillStitch: (col: number, row: number) => {
+    const { pattern, progress, selectedPaletteIndex } = get();
+    if (!pattern || !progress || selectedPaletteIndex === null) return;
+
+    const startIndex = row * pattern.width + col;
+    if (startIndex < 0 || startIndex >= progress.stitchedState.length) return;
+
+    // Check if starting cell is valid for flood fill
+    const startTargetIndex = pattern.targets[startIndex];
+    if (startTargetIndex !== selectedPaletteIndex) return; // Must match selected color
+    if (progress.stitchedState[startIndex] !== StitchState.None) return; // Must be unstitched
+
+    // BFS to find all connected cells with same target color that are unstitched
+    const cellsToFill: number[] = [];
+    const visited = new Set<number>();
+    const queue: Array<{ col: number; row: number }> = [{ col, row }];
+
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      const cellIndex = current.row * pattern.width + current.col;
+
+      if (visited.has(cellIndex)) continue;
+      if (current.col < 0 || current.col >= pattern.width) continue;
+      if (current.row < 0 || current.row >= pattern.height) continue;
+
+      const targetIndex = pattern.targets[cellIndex];
+      if (targetIndex !== selectedPaletteIndex) continue; // Different color
+      if (progress.stitchedState[cellIndex] !== StitchState.None) continue; // Already stitched
+
+      visited.add(cellIndex);
+      cellsToFill.push(cellIndex);
+
+      // Add orthogonal neighbors (not diagonal)
+      queue.push({ col: current.col - 1, row: current.row }); // left
+      queue.push({ col: current.col + 1, row: current.row }); // right
+      queue.push({ col: current.col, row: current.row - 1 }); // up
+      queue.push({ col: current.col, row: current.row + 1 }); // down
+    }
+
+    if (cellsToFill.length === 0) return;
+
+    // Place all stitches at once
+    const newStitchedState = new Uint8Array(progress.stitchedState);
+    const newPlacedColors = new Uint16Array(progress.placedColors);
+    const newPaletteCounts = [...progress.paletteCounts];
+
+    for (const cellIndex of cellsToFill) {
+      const targetIndex = pattern.targets[cellIndex];
+      const isCorrect = targetIndex === selectedPaletteIndex;
+      const newState = isCorrect ? StitchState.Correct : StitchState.Wrong;
+
+      newStitchedState[cellIndex] = newState;
+      newPlacedColors[cellIndex] = selectedPaletteIndex;
+
+      if (isCorrect) {
+        newPaletteCounts[targetIndex] = {
+          ...newPaletteCounts[targetIndex],
+          remainingTargets: newPaletteCounts[targetIndex].remainingTargets - 1,
+          correctCount: newPaletteCounts[targetIndex].correctCount + 1,
+        };
+      } else {
+        newPaletteCounts[selectedPaletteIndex] = {
+          ...newPaletteCounts[selectedPaletteIndex],
+          wrongCount: newPaletteCounts[selectedPaletteIndex].wrongCount + 1,
+        };
+      }
+    }
+
+    const updatedProgress: UserProgress = {
+      ...progress,
+      stitchedState: newStitchedState,
+      placedColors: newPlacedColors,
       paletteCounts: newPaletteCounts,
     };
 
@@ -186,30 +283,25 @@ export const useGameStore = create<GameState>((set, get) => ({
     const newStitchedState = new Uint8Array(progress.stitchedState);
     newStitchedState[cellIndex] = StitchState.None;
 
-    // Find which palette was used for this wrong stitch by checking all palette wrong counts
-    // We need to track which palette made the wrong stitch - for now we'll just decrement total wrong count
-    // Since we track wrong count per palette that made the wrong stitch, we need to figure out which one
-    // Actually, we stored wrong count based on selectedPaletteIndex at time of stitch
-    // We need another way to track this - for simplicity, let's iterate and find a palette with wrong count > 0
-    // This is imperfect but works for the game mechanic
+    // Get which palette was actually placed and clear it
+    const placedPaletteIndex = progress.placedColors[cellIndex];
+    const newPlacedColors = new Uint16Array(progress.placedColors);
+    newPlacedColors[cellIndex] = NO_STITCH;
 
     const newPaletteCounts = [...progress.paletteCounts];
 
-    // Find first palette with wrong count > 0 and decrement
-    // Note: This is a simplification. In a real implementation, you'd track which palette made each wrong stitch
-    for (let i = 0; i < newPaletteCounts.length; i++) {
-      if (newPaletteCounts[i].wrongCount > 0) {
-        newPaletteCounts[i] = {
-          ...newPaletteCounts[i],
-          wrongCount: newPaletteCounts[i].wrongCount - 1,
-        };
-        break;
-      }
+    // Decrement wrong count for the palette that was actually used
+    if (placedPaletteIndex !== NO_STITCH && placedPaletteIndex < newPaletteCounts.length) {
+      newPaletteCounts[placedPaletteIndex] = {
+        ...newPaletteCounts[placedPaletteIndex],
+        wrongCount: Math.max(0, newPaletteCounts[placedPaletteIndex].wrongCount - 1),
+      };
     }
 
     const updatedProgress: UserProgress = {
       ...progress,
       stitchedState: newStitchedState,
+      placedColors: newPlacedColors,
       paletteCounts: newPaletteCounts,
     };
 

@@ -40,9 +40,12 @@ interface OxsChart {
 const SYMBOLS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz@#$%&*+-=~^<>!?/|';
 
 function getSymbol(index: number, providedSymbol?: string): string {
-  if (providedSymbol && providedSymbol.trim()) {
-    return providedSymbol.trim().charAt(0) || SYMBOLS[index % SYMBOLS.length];
+  // Only use provided symbol if it's exactly one character to avoid collisions
+  // Multi-character symbols like "10", "11" would truncate to "1" causing duplicates
+  if (providedSymbol && providedSymbol.trim().length === 1) {
+    return providedSymbol.trim();
   }
+  // Generate unique symbol from the palette index
   return SYMBOLS[index % SYMBOLS.length];
 }
 

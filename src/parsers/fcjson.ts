@@ -49,16 +49,9 @@ const FCJSONSchema = z.object({
 
 const SYMBOLS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz@#$%&*+-=~^<>!?/|';
 
-function getSymbol(index: number, providedSymbol?: string): string {
-  if (providedSymbol && providedSymbol.trim()) {
-    // Extract a simple character from symbol codes like "sm0", "sm28"
-    const match = providedSymbol.match(/sm(\d+)/);
-    if (match) {
-      const num = parseInt(match[1], 10);
-      return SYMBOLS[num % SYMBOLS.length];
-    }
-    return providedSymbol.trim().charAt(0) || SYMBOLS[index % SYMBOLS.length];
-  }
+function getSymbol(index: number): string {
+  // Always use the index-based symbol to ensure uniqueness
+  // This avoids collisions from multi-character symbols or symbol codes
   return SYMBOLS[index % SYMBOLS.length];
 }
 
@@ -135,7 +128,7 @@ export async function parseFCJSON(content: string): Promise<PatternDoc> {
       brand,
       code: floss.id || undefined,
       hex,
-      symbol: getSymbol(i, floss.symbol),
+      symbol: getSymbol(i),
       totalTargets: 0,
     };
   });

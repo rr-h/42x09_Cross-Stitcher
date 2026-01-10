@@ -8,16 +8,23 @@ import {
   gridToWorld,
 } from '../utils/coordinates';
 import type { ViewportTransform, GridCell } from '../types';
+import { StitchState } from '../types';
 
-const DRAG_THRESHOLD = 5;
+type DragMode = 'none' | 'stitch' | 'pan';
 
 interface DragState {
   isDragging: boolean;
+  mode: DragMode;
   startX: number;
   startY: number;
   startTranslateX: number;
   startTranslateY: number;
-  hasMoved: boolean;
+  lastCell: GridCell | null;
+  visitedCells: Set<string>;
+}
+
+function cellKey(col: number, row: number): string {
+  return `${col},${row}`;
 }
 
 export function PatternCanvas() {
@@ -26,11 +33,13 @@ export function PatternCanvas() {
   const [size, setSize] = useState({ width: 800, height: 600 });
   const dragStateRef = useRef<DragState>({
     isDragging: false,
+    mode: 'none',
     startX: 0,
     startY: 0,
     startTranslateX: 0,
     startTranslateY: 0,
-    hasMoved: false,
+    lastCell: null,
+    visitedCells: new Set(),
   });
 
   const pattern = useGameStore(s => s.pattern);
@@ -43,8 +52,11 @@ export function PatternCanvas() {
 
   const setViewport = useGameStore(s => s.setViewport);
   const placeStitch = useGameStore(s => s.placeStitch);
+  const floodFillStitch = useGameStore(s => s.floodFillStitch);
   const removeWrongStitch = useGameStore(s => s.removeWrongStitch);
   const closeCelebration = useGameStore(s => s.closeCelebration);
+  const getStitchState = useGameStore(s => s.getStitchState);
+  const getTargetPaletteIndex = useGameStore(s => s.getTargetPaletteIndex);
 
   // Handle resize
   useEffect(() => {
@@ -92,43 +104,129 @@ export function PatternCanvas() {
       ctx,
       pattern,
       stitchedState: progress.stitchedState,
+      placedColors: progress.placedColors,
       selectedPaletteIndex,
       viewport,
       canvasWidth: size.width,
       canvasHeight: size.height,
     });
-  }, [pattern, progress?.stitchedState, viewport, size, selectedPaletteIndex]);
+  }, [pattern, progress?.stitchedState, progress?.placedColors, viewport, size, selectedPaletteIndex]);
+
+  // Try to place stitch at cell, returns true if stitch was placed
+  const tryPlaceStitch = useCallback((col: number, row: number): boolean => {
+    if (!pattern || isComplete || selectedPaletteIndex === null) return false;
+    if (col < 0 || col >= pattern.width || row < 0 || row >= pattern.height) return false;
+
+    const state = getStitchState(col, row);
+    if (state !== StitchState.None) return false; // Already stitched
+
+    if (toolMode === 'stitch') {
+      placeStitch(col, row);
+      return true;
+    }
+    return false;
+  }, [pattern, isComplete, selectedPaletteIndex, toolMode, getStitchState, placeStitch]);
 
   // Handle pointer down
   const handlePointerDown = useCallback((e: React.PointerEvent) => {
     const rect = canvasRef.current?.getBoundingClientRect();
-    if (!rect) return;
+    if (!rect || !pattern || !progress) return;
+
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const cell = screenToGrid(x, y, viewport);
+
+    // Determine drag mode based on what's under the cursor
+    let mode: DragMode = 'none';
+
+    if (cell.col >= 0 && cell.col < pattern.width && cell.row >= 0 && cell.row < pattern.height) {
+      const state = getStitchState(cell.col, cell.row);
+      const targetIdx = getTargetPaletteIndex(cell.col, cell.row);
+
+      if (toolMode === 'picker') {
+        // Picker mode - just handle clicks, no drag stitching
+        if (state === StitchState.Wrong) {
+          removeWrongStitch(cell.col, cell.row);
+        }
+        mode = 'pan';
+      } else if (toolMode === 'fill') {
+        // Fill mode - flood fill all connected cells of the same color
+        if (state === StitchState.None && selectedPaletteIndex !== null && targetIdx === selectedPaletteIndex) {
+          floodFillStitch(cell.col, cell.row);
+        }
+        mode = 'pan';
+      } else if (state === StitchState.None && selectedPaletteIndex !== null) {
+        // Unstitched cell with palette selected - start stitch painting
+        mode = 'stitch';
+        tryPlaceStitch(cell.col, cell.row);
+      } else {
+        // Stitched cell or no palette selected - pan mode
+        mode = 'pan';
+      }
+    } else {
+      // Outside pattern bounds - pan mode
+      mode = 'pan';
+    }
 
     dragStateRef.current = {
       isDragging: true,
+      mode,
       startX: e.clientX,
       startY: e.clientY,
       startTranslateX: viewport.translateX,
       startTranslateY: viewport.translateY,
-      hasMoved: false,
+      lastCell: cell,
+      visitedCells: new Set([cellKey(cell.col, cell.row)]),
     };
 
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
-  }, [viewport]);
+  }, [pattern, progress, viewport, toolMode, selectedPaletteIndex, getStitchState, getTargetPaletteIndex, tryPlaceStitch, floodFillStitch, removeWrongStitch]);
 
   // Handle pointer move
   const handlePointerMove = useCallback((e: React.PointerEvent) => {
     const dragState = dragStateRef.current;
-    if (!dragState.isDragging) return;
+    if (!dragState.isDragging || !pattern) return;
 
-    const dx = e.clientX - dragState.startX;
-    const dy = e.clientY - dragState.startY;
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect) return;
 
-    if (Math.abs(dx) > DRAG_THRESHOLD || Math.abs(dy) > DRAG_THRESHOLD) {
-      dragState.hasMoved = true;
-    }
+    if (dragState.mode === 'stitch') {
+      // Stitch painting mode - place stitches as we drag
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      const cell = screenToGrid(x, y, viewport);
 
-    if (dragState.hasMoved && pattern) {
+      const key = cellKey(cell.col, cell.row);
+      if (!dragState.visitedCells.has(key)) {
+        dragState.visitedCells.add(key);
+
+        // Interpolate between last cell and current cell to not miss any
+        if (dragState.lastCell) {
+          const dx = cell.col - dragState.lastCell.col;
+          const dy = cell.row - dragState.lastCell.row;
+          const steps = Math.max(Math.abs(dx), Math.abs(dy));
+
+          if (steps > 1) {
+            for (let i = 1; i < steps; i++) {
+              const interpCol = Math.round(dragState.lastCell.col + (dx * i) / steps);
+              const interpRow = Math.round(dragState.lastCell.row + (dy * i) / steps);
+              const interpKey = cellKey(interpCol, interpRow);
+              if (!dragState.visitedCells.has(interpKey)) {
+                dragState.visitedCells.add(interpKey);
+                tryPlaceStitch(interpCol, interpRow);
+              }
+            }
+          }
+        }
+
+        tryPlaceStitch(cell.col, cell.row);
+        dragState.lastCell = cell;
+      }
+    } else if (dragState.mode === 'pan') {
+      // Pan mode
+      const dx = e.clientX - dragState.startX;
+      const dy = e.clientY - dragState.startY;
+
       const newViewport: ViewportTransform = {
         scale: viewport.scale,
         translateX: dragState.startTranslateX + dx,
@@ -138,37 +236,17 @@ export function PatternCanvas() {
       const clamped = clampViewport(newViewport, pattern.width, pattern.height, size.width, size.height);
       setViewport(clamped);
     }
-  }, [pattern, viewport.scale, size, setViewport]);
+  }, [pattern, viewport, size, setViewport, tryPlaceStitch]);
 
   // Handle pointer up
   const handlePointerUp = useCallback((e: React.PointerEvent) => {
-    const dragState = dragStateRef.current;
-    const wasClick = !dragState.hasMoved;
-
     dragStateRef.current.isDragging = false;
-    dragStateRef.current.hasMoved = false;
+    dragStateRef.current.mode = 'none';
+    dragStateRef.current.visitedCells.clear();
+    dragStateRef.current.lastCell = null;
 
     (e.target as HTMLElement).releasePointerCapture(e.pointerId);
-
-    if (wasClick && pattern && !isComplete) {
-      const rect = canvasRef.current?.getBoundingClientRect();
-      if (!rect) return;
-
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
-      const cell = screenToGrid(x, y, viewport);
-
-      if (cell.col >= 0 && cell.col < pattern.width && cell.row >= 0 && cell.row < pattern.height) {
-        if (toolMode === 'stitch') {
-          if (selectedPaletteIndex !== null) {
-            placeStitch(cell.col, cell.row);
-          }
-        } else if (toolMode === 'picker') {
-          removeWrongStitch(cell.col, cell.row);
-        }
-      }
-    }
-  }, [pattern, viewport, toolMode, selectedPaletteIndex, placeStitch, removeWrongStitch, isComplete]);
+  }, []);
 
   // Handle wheel zoom
   const handleWheel = useCallback((e: React.WheelEvent) => {
@@ -224,9 +302,13 @@ export function PatternCanvas() {
 
   // Get cursor style
   const getCursor = () => {
-    if (dragStateRef.current.hasMoved) return 'grabbing';
+    const dragState = dragStateRef.current;
+    if (dragState.isDragging && dragState.mode === 'pan') return 'grabbing';
+    if (dragState.isDragging && dragState.mode === 'stitch') return 'crosshair';
     if (toolMode === 'picker') return 'crosshair';
-    return 'default';
+    if (toolMode === 'fill') return 'cell';
+    if (selectedPaletteIndex !== null) return 'crosshair';
+    return 'grab';
   };
 
   if (!pattern) {

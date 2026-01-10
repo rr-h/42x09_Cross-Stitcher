@@ -51,12 +51,13 @@ export interface ViewportTransform {
 export interface UserProgress {
   patternId: string;
   stitchedState: Uint8Array;
+  placedColors: Uint16Array; // Which palette index was actually placed (NO_STITCH if none)
   paletteCounts: PaletteCounts[];
   lastSelectedPaletteIndex: number | null;
   viewport: ViewportTransform;
 }
 
-export type ToolMode = 'stitch' | 'picker';
+export type ToolMode = 'stitch' | 'picker' | 'fill';
 
 export interface Point {
   x: number;

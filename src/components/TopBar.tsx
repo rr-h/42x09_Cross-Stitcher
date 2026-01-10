@@ -15,6 +15,7 @@ export function TopBar() {
 
   const loadPattern = useGameStore(s => s.loadPattern);
   const setViewport = useGameStore(s => s.setViewport);
+  const setToolMode = useGameStore(s => s.setToolMode);
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -113,6 +114,42 @@ export function TopBar() {
       <div style={styles.center}>
         {pattern && (
           <>
+            <div style={styles.toolGroup}>
+              <button
+                onClick={() => setToolMode('stitch')}
+                style={{
+                  ...styles.toolButton,
+                  backgroundColor: toolMode === 'stitch' ? '#2D5A27' : '#f0f0f0',
+                  color: toolMode === 'stitch' ? 'white' : '#333',
+                }}
+                title="Stitch Tool - Click or drag to place stitches"
+              >
+                Needle
+              </button>
+              <button
+                onClick={() => setToolMode('fill')}
+                style={{
+                  ...styles.toolButton,
+                  backgroundColor: toolMode === 'fill' ? '#2D5A27' : '#f0f0f0',
+                  color: toolMode === 'fill' ? 'white' : '#333',
+                }}
+                title="Fill Tool - Click to fill all connected cells of the same color"
+              >
+                Fill
+              </button>
+              <button
+                onClick={() => setToolMode('picker')}
+                style={{
+                  ...styles.toolButton,
+                  backgroundColor: toolMode === 'picker' ? '#2D5A27' : '#f0f0f0',
+                  color: toolMode === 'picker' ? 'white' : '#333',
+                }}
+                title="Picker Tool - Click wrong stitches to remove them"
+              >
+                Picker
+              </button>
+            </div>
+            <div style={styles.separator} />
             <button onClick={handleZoomOut} style={styles.zoomButton}>-</button>
             <span style={styles.zoomLevel}>{Math.round(viewport.scale * 100)}%</span>
             <button onClick={handleZoomIn} style={styles.zoomButton}>+</button>
@@ -124,9 +161,6 @@ export function TopBar() {
       <div style={styles.right}>
         {pattern && (
           <>
-            <span style={styles.modeIndicator}>
-              {toolMode === 'stitch' ? 'Stitch Mode' : 'Picker Mode'}
-            </span>
             <div style={styles.progressContainer}>
               <div
                 style={{
@@ -212,12 +246,24 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: 'pointer',
     fontSize: '0.85rem',
   },
-  modeIndicator: {
-    fontSize: '0.85rem',
-    padding: '0.25rem 0.75rem',
-    backgroundColor: '#f0f0f0',
+  toolGroup: {
+    display: 'flex',
+    gap: '0.25rem',
+  },
+  toolButton: {
+    padding: '0.375rem 0.75rem',
+    border: '1px solid #ddd',
     borderRadius: '0.25rem',
-    color: '#666',
+    cursor: 'pointer',
+    fontSize: '0.85rem',
+    fontWeight: '500',
+    transition: 'background-color 0.15s, color 0.15s',
+  },
+  separator: {
+    width: '1px',
+    height: '24px',
+    backgroundColor: '#ddd',
+    margin: '0 0.5rem',
   },
   progressContainer: {
     width: '100px',
