@@ -1,0 +1,223 @@
+# Coding Agent Prompt: Cross-stitch Pattern Game Web App (OXS + FCJSON)
+
+You are building a complete, production-quality web app game for cross-stitching patterns from uploaded files. The app renders a symbol-based pattern grid and lets the user stitch it interactively, square by square, with realistic-looking stitches.
+
+## 0) Core concept (what the user does)
+1. User uploads a pattern file: .oxs (Open Cross Stitch XML) or .fcjson (FlossCross JSON export).
+2. App parses the file into an internal Pattern model:
+   - grid width/height in stitches
+   - palette (thread colours) each with a symbol and colour metadata
+   - per-cell target assignment (which palette entry belongs in each cell)
+3. The canvas initially shows a monochrome "symbol-only" pattern:
+   - each cell shows ONLY its symbol (no fill blocks)
+   - fabric background + subtle grid
+4. User selects a palette entry (colour/symbol).
+5. User clicks a grid cell:
+   - if selection matches the cell target -> place a realistic stitch in that colour (correct)
+   - if selection does NOT match -> still place stitch, but mark it wrong and overlay a yellow "!" with black outline
+6. When a palette entry is fully completed (all its target cells are correctly stitched), it disappears from the palette.
+7. When all cells are correctly stitched (no remaining unstitched targets), show a completion celebration and auto-zoom to fit the whole finished design.
+
+## 1) Non-negotiable behaviours
+### 1.1 Stitch placement and validation
+- A cell has a target paletteId.
+- When user clicks with paletteId selected:
+  - If cell is unstitched: create a stitch instance.
+  - If cell is already stitched (correct or wrong): do nothing (no toggle).
+- Correct stitch: stitch rendered, no warning overlay.
+- Wrong stitch: stitch rendered + warning overlay "!".
+- Wrong stitches must be removable via a dedicated tool/mode (see 1.3). Correct stitches are NOT removable (unless explicitly stated later; do not implement undo for correct stitches).
+
+### 1.2 Palette behaviour and auto-navigation
+- Palette contains exactly the colours present in the imported file.
+- Each palette tile shows:
+  - symbol
+  - thread colour swatch
+  - label (DMC/Anchor code if available, else best available name)
+  - remaining count (unstitched target cells for that paletteId)
+- When user clicks a palette tile (even if it is already selected):
+  - select it
+  - automatically re-centre the viewport to the nearest remaining unstitched target cell for that paletteId
+  - if no remaining targets exist for that paletteId, that palette tile must not be shown (it has already disappeared)
+
+Nearest target definition:
+- Convert current viewport centre into grid coordinates.
+- Among all target cells for that paletteId that are still unstitched (no stitch present), pick the one with minimum squared Euclidean distance to the viewport centre.
+- Animate pan (and only pan, not mandatory zoom) so that cell ends up near the viewport centre with a small padding margin.
+
+### 1.3 Wrong-stitch removal tool (stitch picker)
+- If at least one wrong stitch exists anywhere:
+  - the palette area must show an extra tool option: "Stitch picker" (eraser mode)
+- When stitch picker is active:
+  - clicking a cell removes the stitch ONLY if it is marked wrong
+  - clicking elsewhere does nothing
+- When no wrong stitches remain:
+  - stitch picker option disappears automatically
+
+### 1.4 Zoom, pan, and interaction rules
+- The pattern is rendered on a main canvas viewport with:
+  - zoom in/out (mouse wheel + trackpad pinch if feasible)
+  - click-and-drag panning:
+    - dragging pans the canvas
+    - clicking without drag attempts stitch placement (depending on mode)
+- Ensure input disambiguation:
+  - treat pointer movement beyond a small threshold (eg 4-6 px) as a pan gesture, not a click
+- Enforce min/max zoom (eg min fits whole design, max shows large stitch detail).
+
+### 1.5 Completion behaviour
+- A pattern is complete only when every cell that has a target paletteId has a correct stitch placed.
+- On completion:
+  - show an on-canvas message overlay celebrating completion
+  - auto-zoom to fit the entire pattern in the viewport (with padding)
+  - disable palette (it will be empty anyway)
+
+## 2) Visual requirements (rendering)
+### 2.1 Realistic stitch rendering
+Stitches must look like thread, not flat vector X marks.
+Implement a renderer that draws a cross-stitch as two thread strands crossing diagonally:
+- strand A: bottom-left to top-right
+- strand B: top-left to bottom-right
+Each strand should have:
+- thickness with rounded ends
+- highlight and shadow suggesting cylindrical thread
+- subtle texture/noise so it does not look like a gradient rectangle
+- slight randomness per cell (seeded by cell coordinate) to avoid copy-paste uniformity, but deterministic across sessions
+
+Fabric background:
+- off-white fabric colour
+- subtle weave noise/texture (procedural is fine)
+- faint grid lines (fade with zoom level to avoid clutter)
+
+Symbols:
+- symbols are shown in each unstitched cell
+- once stitched (correct or wrong), symbol can be hidden or heavily deemphasised (choose one consistent rule)
+
+Warning overlay for wrong stitches:
+- yellow exclamation mark "!" with black outline
+- must scale with zoom and remain legible
+- sits above the stitch drawing
+
+### 2.2 Performance constraints
+Patterns can be large (hundreds by hundreds). Rendering must remain responsive.
+Use one of:
+- Canvas2D with culling (only draw visible cells)
+- Layered offscreen canvases:
+  - static layer: fabric + grid + symbols
+  - dynamic layer: stitches + warnings
+Update only what changes when a stitch is placed.
+
+## 3) File import support
+### 3.1 OXS (.oxs)
+- OXS is XML-based "Open Cross Stitch" format.
+- Support at least:
+  - overall dimensions
+  - palette (threads/colours + symbols if present)
+  - full stitches grid
+- Convert into internal Pattern model with:
+  - width, height
+  - palette entries
+  - cellTargets: paletteId per cell
+
+### 3.2 FCJSON (.fcjson)
+- FCJSON is a JSON export used by FlossCross.
+- Implement a tolerant parser:
+  - accept minor schema variations
+  - detect width/height, palette list, and per-cell mapping
+- If the file contains additional stitch types, ignore them unless they map cleanly to full cross stitches.
+
+### 3.3 Import UX
+- Drag-and-drop and file picker.
+- File is processed entirely client-side.
+- If parsing fails, show a clear error message with what was missing.
+
+## 4) Internal data model (define explicitly in code)
+Use TypeScript types like:
+
+PatternDoc:
+- id: string (hash of file contents for persistence)
+- width: number
+- height: number
+- palette: PaletteEntry[]
+- targets: Uint16Array | Uint32Array (length = width*height), storing paletteIndex (0..n-1), or 0xFFFF for "no stitch"
+- meta: object (optional: title, author, thread brand, etc)
+
+PaletteEntry:
+- paletteIndex: number
+- paletteId: string (stable id, eg "dmc-310" or generated)
+- name: string
+- brand?: string
+- code?: string
+- hex: string
+- symbol: string (single character or short string)
+- totalTargets: number
+
+UserProgress:
+- stitchedState: Uint8Array (0=none, 1=correct, 2=wrong) length=width*height
+- counts per paletteIndex: remainingTargets, wrongCount, correctCount
+- lastSelectedPaletteIndex
+- viewport transform: scale + translate
+
+## 5) UI layout (minimum viable, but complete)
+- Main area: large canvas viewport
+- Side panel: palette list (scrollable)
+- Top bar: zoom controls (+, -, fit), current mode indicator (stitch vs stitch picker), file import button, basic stats (progress %)
+
+Palette tiles:
+- show symbol + colour swatch + remaining count
+- disappear when remaining count hits 0
+
+## 6) Persistence (required)
+- Persist progress locally per pattern file hash:
+  - stitchedState
+  - last selected palette
+  - viewport transform (optional)
+Use IndexedDB (preferred) or localStorage (acceptable if careful with size).
+On reload, if the same pattern is loaded again, restore progress.
+
+## 7) Tech stack (choose and implement fully)
+- TypeScript + React (Vite)
+- Rendering: Canvas2D
+- State: Zustand (or equivalent)
+- Parsing:
+  - OXS: fast-xml-parser
+  - FCJSON: direct JSON parse + schema normalisation + zod validation where possible
+- Tests:
+  - Unit tests: vitest for parsers, transforms, nearest-target selection, progress counting
+  - E2E tests: Playwright for core flows (import, stitch correct, stitch wrong, remove wrong, palette disappearance, completion auto-fit)
+
+## 8) Required repo deliverables
+Produce a complete repository with:
+- package.json with scripts:
+  - dev, build, test, test:e2e, lint
+- eslint + prettier configured
+- a small set of fixture files committed under /fixtures:
+  - at least one .oxs
+  - at least one .fcjson
+- documentation:
+  - README: how to run, supported formats, limitations
+  - ARCHITECTURE.md: rendering approach and data model
+- zero stubbed functions: everything wired and functional
+
+## 9) Acceptance criteria (must all pass)
+1. Importing a valid .oxs produces a symbol-only grid and palette.
+2. Importing a valid .fcjson produces a symbol-only grid and palette.
+3. Clicking correct cells places realistic stitches and increments progress.
+4. Clicking wrong cells places stitches and shows yellow "!" overlay.
+5. Stitch picker appears only when wrong stitches exist, and removes only wrong stitches.
+6. Palette entries disappear exactly when fully completed.
+7. Clicking a palette entry recentres to nearest remaining unstitched target for that colour.
+8. Zoom and pan work smoothly; click vs drag is correctly disambiguated.
+9. On full completion, the app celebrates and auto-zooms to fit the entire pattern.
+10. Progress persists across reload for the same imported file.
+
+## 10) Implementation notes (do not skip)
+- Implement coordinate transforms cleanly:
+  - screen -> world -> grid cell
+  - grid -> world -> screen
+- Make all randomness deterministic via a seeded RNG based on (x,y) cell coordinate.
+- Use typed arrays for performance.
+- Keep rendering and game logic separated:
+  - pure game state updates (place stitch, remove wrong stitch)
+  - renderer reads state and draws
+
+Now build the full project.
