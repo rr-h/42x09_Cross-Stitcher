@@ -1,5 +1,5 @@
 import { useGameStore } from '../store';
-import { getViewportCenterInGrid, CELL_SIZE } from '../utils/coordinates';
+import { getViewportCenterInGrid } from '../utils/coordinates';
 import type { GridCell } from '../types';
 
 export function Palette() {

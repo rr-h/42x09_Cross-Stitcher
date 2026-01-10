@@ -1,0 +1,49 @@
+{
+  "sv": 1,
+  "v": 1,
+  "modelId": "test-pattern-001",
+  "model": {
+    "images": [{
+      "width": 3,
+      "height": 3,
+      "flossIndexes": [
+        {
+          "rgb": [0, 0, 0],
+          "hex": 0,
+          "sys": "DMC",
+          "id": "310",
+          "name": "Black",
+          "symbol": "sm0",
+          "order": 0
+        },
+        {
+          "rgb": [200, 0, 0],
+          "hex": 13107200,
+          "sys": "DMC",
+          "id": "321",
+          "name": "Red",
+          "symbol": "sm1",
+          "order": 1
+        }
+      ],
+      "crossIndexes": [
+        { "tp": "cr", "fi": 0 },
+        { "tp": "cr", "fi": 1 }
+      ],
+      "layers": [{
+        "width": 3,
+        "height": 3,
+        "position": { "top": 0, "left": 0 },
+        "cross": [0, 1, 0, 1, 0, 1, 0, 1, 0],
+        "backstitch": []
+      }],
+      "cloth": {
+        "color": "#f1eaed",
+        "count": 14
+      }
+    }]
+  },
+  "info": {
+    "title": "Simple FCJSON Test"
+  }
+}

@@ -5,9 +5,7 @@ import {
   screenToGrid,
   clampViewport,
   calculateFitViewport,
-  getViewportCenterInGrid,
   gridToWorld,
-  CELL_SIZE,
 } from '../utils/coordinates';
 import type { ViewportTransform, GridCell } from '../types';
 

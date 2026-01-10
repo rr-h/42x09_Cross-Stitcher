@@ -149,7 +149,6 @@ export async function parseFCJSON(content: string): Promise<PatternDoc> {
   if (layer?.cross) {
     const cross = layer.cross;
     const layerWidth = layer.width;
-    const layerHeight = layer.height;
     const offsetTop = layer.position?.top ?? 0;
     const offsetLeft = layer.position?.left ?? 0;
 

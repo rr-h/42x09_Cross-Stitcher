@@ -57,7 +57,7 @@ function createInitialProgress(pattern: PatternDoc): UserProgress {
   };
 }
 
-function checkCompletion(pattern: PatternDoc, paletteCounts: PaletteCounts[]): boolean {
+function checkCompletion(_pattern: PatternDoc, paletteCounts: PaletteCounts[]): boolean {
   return paletteCounts.every(pc => pc.remainingTargets === 0);
 }
 

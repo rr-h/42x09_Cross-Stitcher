@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<chart>
+  <format comments01="Simple test pattern" />
+  <properties
+    oxsversion="1.0"
+    software="Cross-Stitcher"
+    chartheight="5"
+    chartwidth="5"
+    charttitle="Simple Test"
+    author="Test"
+    stitchesperinch="14"
+    palettecount="3"
+  />
+  <palette>
+    <palette_item index="0" number="cloth" name="cloth" color="f1eaed" symbol="0" />
+    <palette_item index="1" number="DMC 310" name="Black" color="000000" symbol="X" />
+    <palette_item index="2" number="DMC 321" name="Red" color="C80000" symbol="O" />
+  </palette>
+  <fullstitches>
+    <stitch x="0" y="0" palindex="1" />
+    <stitch x="1" y="0" palindex="2" />
+    <stitch x="2" y="0" palindex="1" />
+    <stitch x="3" y="0" palindex="2" />
+    <stitch x="4" y="0" palindex="1" />
+    <stitch x="0" y="1" palindex="2" />
+    <stitch x="1" y="1" palindex="1" />
+    <stitch x="2" y="1" palindex="2" />
+    <stitch x="3" y="1" palindex="1" />
+    <stitch x="4" y="1" palindex="2" />
+    <stitch x="0" y="2" palindex="1" />
+    <stitch x="1" y="2" palindex="2" />
+    <stitch x="2" y="2" palindex="1" />
+    <stitch x="3" y="2" palindex="2" />
+    <stitch x="4" y="2" palindex="1" />
+    <stitch x="0" y="3" palindex="2" />
+    <stitch x="1" y="3" palindex="1" />
+    <stitch x="2" y="3" palindex="2" />
+    <stitch x="3" y="3" palindex="1" />
+    <stitch x="4" y="3" palindex="2" />
+    <stitch x="0" y="4" palindex="1" />
+    <stitch x="1" y="4" palindex="2" />
+    <stitch x="2" y="4" palindex="1" />
+    <stitch x="3" y="4" palindex="2" />
+    <stitch x="4" y="4" palindex="1" />
+  </fullstitches>
+</chart>
