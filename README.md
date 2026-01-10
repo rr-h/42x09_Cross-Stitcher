@@ -101,6 +101,31 @@ JSON export from FlossCross with:
 - Large patterns (500x500+) may have performance impacts
 - Progress is stored locally per browser
 
+## Deployment to GitHub Pages
+
+This project is configured for automatic deployment to GitHub Pages.
+
+### Automatic Deployment
+
+1. Push your code to the `main` branch
+2. GitHub Actions will automatically build and deploy to GitHub Pages
+3. Access your app at `https://<username>.github.io/42x09_Cross-Stitcher/`
+
+### Manual Setup (first time)
+
+1. Go to your GitHub repository settings
+2. Navigate to **Pages** in the sidebar
+3. Under "Build and deployment", select **GitHub Actions** as the source
+4. Push to `main` branch to trigger the first deployment
+
+### Custom Repository Name
+
+If you rename the repository, update the `base` path in [vite.config.ts](vite.config.ts):
+
+```typescript
+base: process.env.GITHUB_ACTIONS ? '/your-repo-name/' : '/',
+```
+
 ## Project Structure
 
 ```
