@@ -24,6 +24,43 @@ class MockIDBRequest {
   error: Error | null = null;
   onsuccess: ((event: Event) => void) | null = null;
   onerror: ((event: Event) => void) | null = null;
+  private _listeners: Map<string, Set<EventListenerOrEventListenerObject>> = new Map();
+
+  addEventListener(type: string, listener: EventListenerOrEventListenerObject): void {
+    if (!this._listeners.has(type)) {
+      this._listeners.set(type, new Set());
+    }
+    this._listeners.get(type)!.add(listener);
+    // Also map to onsuccess/onerror for compatibility
+    if (type === 'success' && typeof listener === 'function') {
+      this.onsuccess = listener as (event: Event) => void;
+    } else if (type === 'error' && typeof listener === 'function') {
+      this.onerror = listener as (event: Event) => void;
+    }
+  }
+
+  removeEventListener(type: string, listener: EventListenerOrEventListenerObject): void {
+    this._listeners.get(type)?.delete(listener);
+  }
+
+  dispatchEvent(event: Event): boolean {
+    const listeners = this._listeners.get(event.type);
+    if (listeners) {
+      for (const listener of listeners) {
+        if (typeof listener === 'function') {
+          listener(event);
+        } else {
+          listener.handleEvent(event);
+        }
+      }
+    }
+    return true;
+  }
+}
+
+// Expose IDBRequest globally for idb library compatibility
+if (typeof globalAny.IDBRequest === 'undefined') {
+  globalAny.IDBRequest = MockIDBRequest;
 }
 
 class MockIDBObjectStore {

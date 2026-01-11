@@ -71,6 +71,9 @@ export function PatternCanvas() {
     centerY: 0,
   });
 
+  // Track last handled navigation nonce to avoid re-handling the same request
+  const lastNavigationNonceRef = useRef<number>(-1);
+
   const pattern = useGameStore(s => s.pattern);
   const progress = useGameStore(s => s.progress);
   const viewport = useGameStore(s => s.viewport);
@@ -78,6 +81,7 @@ export function PatternCanvas() {
   const toolMode = useGameStore(s => s.toolMode);
   const isComplete = useGameStore(s => s.isComplete);
   const showCelebration = useGameStore(s => s.showCelebration);
+  const navigationRequest = useGameStore(s => s.navigationRequest);
 
   const setViewport = useGameStore(s => s.setViewport);
   const placeStitch = useGameStore(s => s.placeStitch);
@@ -86,6 +90,7 @@ export function PatternCanvas() {
   const closeCelebration = useGameStore(s => s.closeCelebration);
   const getStitchState = useGameStore(s => s.getStitchState);
   const getTargetPaletteIndex = useGameStore(s => s.getTargetPaletteIndex);
+  const clearNavigationRequest = useGameStore(s => s.clearNavigationRequest);
 
   // Compute cursor style based on tool mode (but not drag state)
   const baseCursorStyle = useMemo(() => {
@@ -461,12 +466,12 @@ export function PatternCanvas() {
     }
   }, []);
 
-  // Navigate to cell
-  const navigateToCell = useCallback(
-    (cell: GridCell) => {
+  // Navigate to a grid cell by centering the viewport on it
+  const navigateToCellInternal = useCallback(
+    (col: number, row: number) => {
       if (!pattern) return;
 
-      const targetWorld = gridToWorld(cell.col + 0.5, cell.row + 0.5);
+      const targetWorld = gridToWorld(col + 0.5, row + 0.5);
       const newTranslateX = size.width / 2 - targetWorld.x * viewport.scale;
       const newTranslateY = size.height / 2 - targetWorld.y * viewport.scale;
 
@@ -488,11 +493,35 @@ export function PatternCanvas() {
     [pattern, viewport.scale, size, setViewport]
   );
 
-  // Expose navigation method for palette clicks
+  // Handle navigation requests from the store (triggered by Palette selection)
   useEffect(() => {
-    (window as unknown as { navigateToCell: (cell: GridCell) => void }).navigateToCell =
-      navigateToCell;
-  }, [navigateToCell]);
+    if (!navigationRequest || !pattern) return;
+
+    // Skip if we've already handled this request (same nonce)
+    if (navigationRequest.nonce === lastNavigationNonceRef.current) return;
+
+    // Mark this request as handled
+    lastNavigationNonceRef.current = navigationRequest.nonce;
+
+    const { cellIndex } = navigationRequest;
+    const totalCells = pattern.width * pattern.height;
+
+    // Validate cell index
+    if (cellIndex < 0 || cellIndex >= totalCells) {
+      clearNavigationRequest();
+      return;
+    }
+
+    // Convert cell index to col/row
+    const col = cellIndex % pattern.width;
+    const row = Math.floor(cellIndex / pattern.width);
+
+    // Navigate to the cell
+    navigateToCellInternal(col, row);
+
+    // Clear the request so it's not re-processed on re-render
+    clearNavigationRequest();
+  }, [navigationRequest, pattern, navigateToCellInternal, clearNavigationRequest]);
 
   if (!pattern) {
     return (

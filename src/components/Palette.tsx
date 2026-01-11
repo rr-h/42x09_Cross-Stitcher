@@ -1,6 +1,5 @@
 import type React from 'react';
 import { useGameStore } from '../store';
-import type { GridCell } from '../types';
 import { getViewportCenterInGrid } from '../utils/coordinates';
 
 export function Palette() {
@@ -14,6 +13,7 @@ export function Palette() {
   const setToolMode = useGameStore(s => s.setToolMode);
   const getTotalWrongCount = useGameStore(s => s.getTotalWrongCount);
   const findNearestUnstitched = useGameStore(s => s.findNearestUnstitched);
+  const navigateToCell = useGameStore(s => s.navigateToCell);
 
   if (!pattern || !progress) {
     return (
@@ -36,6 +36,8 @@ export function Palette() {
   const handlePaletteClick = (paletteIndex: number) => {
     selectPalette(paletteIndex);
 
+    if (!pattern) return;
+
     // Get canvas size from DOM (rough estimate)
     const canvasContainer = document.querySelector('[data-canvas-container]');
     const canvasWidth = canvasContainer?.clientWidth || 800;
@@ -44,16 +46,13 @@ export function Palette() {
     // Get current viewport center in grid coords
     const viewportCenter = getViewportCenterInGrid(canvasWidth, canvasHeight, viewport);
 
-    // Find nearest unstitched cell for this palette
+    // Find nearest unstitched cell for this palette (uses indexed approach)
     const nearest = findNearestUnstitched(paletteIndex, viewportCenter.col, viewportCenter.row);
 
     if (nearest) {
-      // Navigate to that cell
-      const navigateToCell = (window as unknown as { navigateToCell: (cell: GridCell) => void })
-        .navigateToCell;
-      if (navigateToCell) {
-        navigateToCell(nearest);
-      }
+      // Navigate to that cell via store action
+      const cellIndex = nearest.row * pattern.width + nearest.col;
+      navigateToCell(cellIndex, { animate: true });
     }
   };
 
