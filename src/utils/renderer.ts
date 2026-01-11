@@ -1,5 +1,7 @@
+/// <reference lib="dom" />
+
 import type { PatternDoc, ViewportTransform } from '../types';
-import { StitchState, NO_STITCH } from '../types';
+import { NO_STITCH, StitchState } from '../types';
 import { CELL_SIZE, getVisibleGridBounds, worldToScreen } from './coordinates';
 import { getCellRandoms } from './random';
 
@@ -245,7 +247,16 @@ function drawWrongIndicator(
 }
 
 export function renderCanvas(rc: RenderContext): void {
-  const { ctx, pattern, stitchedState, placedColors, selectedPaletteIndex, viewport, canvasWidth, canvasHeight } = rc;
+  const {
+    ctx,
+    pattern,
+    stitchedState,
+    placedColors,
+    selectedPaletteIndex,
+    viewport,
+    canvasWidth,
+    canvasHeight,
+  } = rc;
 
   // Clear and draw background with fabric holes
   ctx.clearRect(0, 0, canvasWidth, canvasHeight);

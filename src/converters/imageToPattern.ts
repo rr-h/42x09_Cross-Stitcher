@@ -1,14 +1,7 @@
-import type { PatternDoc, PaletteEntry, PatternMeta } from '../types';
+import { colorDistance, DMC_COLORS, rgbToHex, type DMCColor } from '../data/dmcColors';
+import type { PaletteEntry, PatternDoc, PatternMeta } from '../types';
 import { NO_STITCH } from '../types';
 import { hashString } from '../utils/hash';
-import {
-  DMC_COLORS,
-  hexToRgb,
-  rgbToHex,
-  colorDistance,
-  findClosestDMCWithDistance,
-  type DMCColor,
-} from '../data/dmcColors';
 
 export interface ImageConversionOptions {
   maxWidth: number;

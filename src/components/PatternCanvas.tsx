@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useGameStore } from '../store';
 import type { GridCell, ViewportTransform } from '../types';
 import { StitchState } from '../types';
@@ -49,9 +49,10 @@ function getTouchCenter(touches: React.TouchList, rect: DOMRect): { x: number; y
 }
 
 export function PatternCanvas() {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
   const [size, setSize] = useState({ width: 800, height: 600 });
+  const [cursorStyle, setCursorStyle] = useState<string>('grab');
   const dragStateRef = useRef<DragState>({
     isDragging: false,
     mode: 'none',
@@ -85,6 +86,19 @@ export function PatternCanvas() {
   const closeCelebration = useGameStore(s => s.closeCelebration);
   const getStitchState = useGameStore(s => s.getStitchState);
   const getTargetPaletteIndex = useGameStore(s => s.getTargetPaletteIndex);
+
+  // Compute cursor style based on tool mode (but not drag state)
+  const baseCursorStyle = useMemo(() => {
+    if (toolMode === 'picker') {
+      return 'crosshair';
+    } else if (toolMode === 'fill') {
+      return 'cell';
+    } else if (selectedPaletteIndex !== null) {
+      return 'crosshair';
+    } else {
+      return 'grab';
+    }
+  }, [toolMode, selectedPaletteIndex]);
 
   // Handle resize
   useEffect(() => {
@@ -222,7 +236,17 @@ export function PatternCanvas() {
         visitedCells: new Set([cellKey(cell.col, cell.row)]),
       };
 
-      (e.target as HTMLElement).setPointerCapture(e.pointerId);
+      // Update cursor for pan mode
+      if (mode === 'pan') {
+        setCursorStyle('grabbing');
+      } else {
+        setCursorStyle(baseCursorStyle);
+      }
+
+      const target = e.target as HTMLElement | null;
+      if (target) {
+        target.setPointerCapture(e.pointerId);
+      }
     },
     [
       pattern,
@@ -230,6 +254,7 @@ export function PatternCanvas() {
       viewport,
       toolMode,
       selectedPaletteIndex,
+      baseCursorStyle,
       getStitchState,
       getTargetPaletteIndex,
       tryPlaceStitch,
@@ -304,14 +329,23 @@ export function PatternCanvas() {
   );
 
   // Handle pointer up
-  const handlePointerUp = useCallback((e: React.PointerEvent) => {
-    dragStateRef.current.isDragging = false;
-    dragStateRef.current.mode = 'none';
-    dragStateRef.current.visitedCells.clear();
-    dragStateRef.current.lastCell = null;
+  const handlePointerUp = useCallback(
+    (e: React.PointerEvent) => {
+      dragStateRef.current.isDragging = false;
+      dragStateRef.current.mode = 'none';
+      dragStateRef.current.visitedCells.clear();
+      dragStateRef.current.lastCell = null;
 
-    (e.target as HTMLElement).releasePointerCapture(e.pointerId);
-  }, []);
+      // Reset cursor based on base style
+      setCursorStyle(baseCursorStyle);
+
+      const target = e.target as HTMLElement | null;
+      if (target) {
+        target.releasePointerCapture(e.pointerId);
+      }
+    },
+    [baseCursorStyle]
+  );
 
   // Handle wheel zoom
   const handleWheel = useCallback(
@@ -460,17 +494,6 @@ export function PatternCanvas() {
       navigateToCell;
   }, [navigateToCell]);
 
-  // Get cursor style
-  const getCursor = () => {
-    const dragState = dragStateRef.current;
-    if (dragState.isDragging && dragState.mode === 'pan') return 'grabbing';
-    if (dragState.isDragging && dragState.mode === 'stitch') return 'crosshair';
-    if (toolMode === 'picker') return 'crosshair';
-    if (toolMode === 'fill') return 'cell';
-    if (selectedPaletteIndex !== null) return 'crosshair';
-    return 'grab';
-  };
-
   if (!pattern) {
     return (
       <div
@@ -506,7 +529,7 @@ export function PatternCanvas() {
         style={{
           width: size.width,
           height: size.height,
-          cursor: getCursor(),
+          cursor: cursorStyle,
           touchAction: 'none',
         }}
         onPointerDown={handlePointerDown}
