@@ -179,7 +179,7 @@ function drawRealisticStitch(
   const y1 = screenY + cellScreenSize - padding;
 
   // Thread thickness - thicker for more realistic look
-  const baseThickness = Math.max(3, cellScreenSize * 0.22);
+  const baseThickness = Math.max(4, cellScreenSize * 0.33);
   const thickness1 = baseThickness * randoms.thickness1;
   const thickness2 = baseThickness * randoms.thickness2;
 

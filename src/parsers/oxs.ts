@@ -2,6 +2,7 @@ import { XMLParser } from 'fast-xml-parser';
 import type { PatternDoc, PaletteEntry, PatternMeta } from '../types';
 import { NO_STITCH } from '../types';
 import { hashString } from '../utils/hash';
+import { assignSymbolsForPalette, MAX_PALETTE_SIZE } from '../symbols';
 
 interface OxsPaletteItem {
   '@_index': string;
@@ -37,16 +38,16 @@ interface OxsChart {
   };
 }
 
-const SYMBOLS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz@#$%&*+-=~^<>!?/|';
-
-function getSymbol(index: number, providedSymbol?: string): string {
-  // Only use provided symbol if it's exactly one character to avoid collisions
-  // Multi-character symbols like "10", "11" would truncate to "1" causing duplicates
-  if (providedSymbol && providedSymbol.trim().length === 1) {
-    return providedSymbol.trim();
-  }
-  // Generate unique symbol from the palette index
-  return SYMBOLS[index % SYMBOLS.length];
+// Intermediate type for palette entries before symbol assignment
+interface PaletteEntryCandidate {
+  paletteIndex: number;
+  paletteId: string;
+  name: string;
+  brand?: string;
+  code?: string;
+  hex: string;
+  symbol?: string; // Candidate symbol from OXS file (may be invalid/duplicate)
+  totalTargets: number;
 }
 
 export async function parseOXS(content: string): Promise<PatternDoc> {
@@ -99,8 +100,15 @@ export async function parseOXS(content: string): Promise<PatternDoc> {
     return idx > 0 && num !== 'cloth';
   });
 
-  // Create palette entries
-  const palette: PaletteEntry[] = threadPalette.map((item, i) => {
+  // Check palette size limit
+  if (threadPalette.length > MAX_PALETTE_SIZE) {
+    throw new Error(
+      `Palette has ${threadPalette.length} colours but maximum supported is ${MAX_PALETTE_SIZE}. Reduce the number of colours.`
+    );
+  }
+
+  // Create palette entries with candidate symbols from OXS
+  const paletteWithCandidates: PaletteEntryCandidate[] = threadPalette.map((item, i) => {
     const originalIndex = parseInt(item['@_index'], 10);
     let hex = item['@_color'] || '000000';
     if (!hex.startsWith('#')) {
@@ -110,6 +118,12 @@ export async function parseOXS(content: string): Promise<PatternDoc> {
     const code = item['@_number'] || '';
     const brand = code.includes('DMC') ? 'DMC' : code.includes('ANC') ? 'Anchor' : undefined;
 
+    // Extract candidate symbol from OXS file
+    // Only accept single-character symbols as candidates
+    const rawSymbol = item['@_symbol'];
+    const candidateSymbol =
+      rawSymbol && rawSymbol.trim().length === 1 ? rawSymbol.trim() : undefined;
+
     return {
       paletteIndex: i,
       paletteId: `pal-${originalIndex}`,
@@ -117,7 +131,7 @@ export async function parseOXS(content: string): Promise<PatternDoc> {
       brand,
       code: code.replace(/^(DMC|ANC)\s*/, '').trim(),
       hex,
-      symbol: getSymbol(i, item['@_symbol']),
+      symbol: candidateSymbol,
       totalTargets: 0,
     };
   });
@@ -148,11 +162,20 @@ export async function parseOXS(content: string): Promise<PatternDoc> {
         if (newIndex !== undefined) {
           const cellIndex = y * width + x;
           targets[cellIndex] = newIndex;
-          palette[newIndex].totalTargets++;
+          paletteWithCandidates[newIndex].totalTargets++;
         }
       }
     }
   }
+
+  // Assign symbols using the central pool
+  // This ensures unique valid symbols, handling duplicates/invalid candidates from OXS
+  const palette: PaletteEntry[] = assignSymbolsForPalette(paletteWithCandidates, {
+    allowProvidedSymbols: true,
+    preferProvidedSymbols: true,
+    conflictPolicy: 'reassign',
+    startingOffset: 0,
+  });
 
   // Generate pattern ID from content hash
   const id = await hashString(content);

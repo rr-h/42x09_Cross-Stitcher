@@ -2,6 +2,7 @@ import { colorDistance, DMC_COLORS, rgbToHex, type DMCColor } from '../data/dmcC
 import type { PaletteEntry, PatternDoc, PatternMeta } from '../types';
 import { NO_STITCH } from '../types';
 import { hashString } from '../utils/hash';
+import { assignSymbolsForPalette, MAX_PALETTE_SIZE } from '../symbols';
 
 export interface ImageConversionOptions {
   maxWidth: number;
@@ -18,9 +19,16 @@ export const DEFAULT_OPTIONS: ImageConversionOptions = {
   useDMCColors: true,
 };
 
-// Fallback symbols for non-DMC colours (quantised without DMC mapping)
-const FALLBACK_SYMBOLS =
-  '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz@#$%&*+-=~^<>!?/|';
+// Intermediate type for palette entries before symbol assignment
+interface PaletteEntryWithoutSymbol {
+  paletteIndex: number;
+  paletteId: string;
+  name: string;
+  brand?: string;
+  code?: string;
+  hex: string;
+  totalTargets: number;
+}
 
 interface ColorCount {
   rgb: [number, number, number];
@@ -283,6 +291,13 @@ export async function convertImageToPattern(
   file: File,
   options: ImageConversionOptions = DEFAULT_OPTIONS
 ): Promise<PatternDoc> {
+  // Validate maxColors does not exceed the symbol pool limit
+  if (options.maxColors > MAX_PALETTE_SIZE) {
+    throw new Error(
+      `Maximum colours (${options.maxColors}) exceeds the limit of ${MAX_PALETTE_SIZE}. Reduce the number of colours.`
+    );
+  }
+
   // Load and resize image
   const img = await loadImage(file);
   const { width, height } = calculateDimensions(
@@ -302,34 +317,32 @@ export async function convertImageToPattern(
   // Quantise colours using median cut
   const quantizedColors = medianCut(colorCounts, options.maxColors);
 
-  // Build palette
-  let palette: PaletteEntry[];
+  // Build palette WITHOUT symbols (symbols are assigned later)
+  let paletteWithoutSymbols: PaletteEntryWithoutSymbol[];
   let paletteRgb: [number, number, number][];
 
   if (options.useDMCColors) {
-    // Map to DMC colours, using built-in DMC symbols
+    // Map to DMC colours (no symbol from DMC - symbols come from central pool)
     const dmcMappings = mapToDMC(quantizedColors);
 
-    palette = dmcMappings.map((mapping, i) => ({
+    paletteWithoutSymbols = dmcMappings.map((mapping, i) => ({
       paletteIndex: i,
       paletteId: `dmc-${mapping.dmc.code}`,
       name: mapping.dmc.name,
       brand: 'DMC',
       code: mapping.dmc.code,
       hex: mapping.dmc.hex,
-      symbol: mapping.dmc.symbol,
       totalTargets: 0,
     }));
 
     paletteRgb = dmcMappings.map(m => m.dmc.rgb);
   } else {
-    // Use quantised colours directly with fallback symbols
-    palette = quantizedColors.map((rgb, i) => ({
+    // Use quantised colours directly (no symbols yet)
+    paletteWithoutSymbols = quantizedColors.map((rgb, i) => ({
       paletteIndex: i,
       paletteId: `color-${i}`,
       name: `Colour ${i + 1}`,
       hex: rgbToHex(rgb[0], rgb[1], rgb[2]),
-      symbol: FALLBACK_SYMBOLS[i % FALLBACK_SYMBOLS.length],
       totalTargets: 0,
     }));
 
@@ -357,7 +370,7 @@ export async function convertImageToPattern(
         // Find closest palette colour directly
         const paletteIdx = findClosestPaletteIndex([r, g, b], paletteRgb);
         targets[cellIndex] = paletteIdx;
-        palette[paletteIdx].totalTargets++;
+        paletteWithoutSymbols[paletteIdx].totalTargets++;
       }
     }
   }
@@ -372,16 +385,15 @@ export async function convertImageToPattern(
 
   const usedIndicesArray = Array.from(usedPaletteIndices).sort((a, b) => a - b);
   const indexRemap = new Map<number, number>();
-  const newPalette: PaletteEntry[] = [];
+  const filteredPalette: PaletteEntryWithoutSymbol[] = [];
 
   for (let newIndex = 0; newIndex < usedIndicesArray.length; newIndex++) {
     const oldIndex = usedIndicesArray[newIndex];
     indexRemap.set(oldIndex, newIndex);
 
-    const entry = { ...palette[oldIndex] };
+    const entry = { ...paletteWithoutSymbols[oldIndex] };
     entry.paletteIndex = newIndex;
-    // Keep the original DMC symbol (no re-assignment needed)
-    newPalette.push(entry);
+    filteredPalette.push(entry);
   }
 
   // Remap targets to new indices
@@ -390,6 +402,22 @@ export async function convertImageToPattern(
       targets[i] = indexRemap.get(targets[i])!;
     }
   }
+
+  // Verify filtered palette size (should not exceed MAX_PALETTE_SIZE)
+  if (filteredPalette.length > MAX_PALETTE_SIZE) {
+    throw new Error(
+      `Palette has ${filteredPalette.length} colours but maximum supported is ${MAX_PALETTE_SIZE}. Reduce the number of colours.`
+    );
+  }
+
+  // Assign symbols from the central pool (CRITICAL: only done once after all filtering)
+  // allowProvidedSymbols = false because image conversion never has pre-existing symbols
+  const finalPalette: PaletteEntry[] = assignSymbolsForPalette(filteredPalette, {
+    allowProvidedSymbols: false,
+    preferProvidedSymbols: false,
+    conflictPolicy: 'reassign',
+    startingOffset: 0,
+  });
 
   // Generate pattern ID
   const contentForHash = `${file.name}-${width}x${height}-${options.maxColors}-${Date.now()}`;
@@ -407,7 +435,7 @@ export async function convertImageToPattern(
     id,
     width,
     height,
-    palette: newPalette,
+    palette: finalPalette,
     targets,
     meta,
   };
