@@ -209,7 +209,7 @@ export function ImageImportModal({ file, onClose }: ImageImportModalProps) {
                   value={maxColors}
                   onChange={e => setMaxColors(parseInt(e.target.value))}
                   min={2}
-                  max={128}
+                  max={490}
                   style={styles.slider}
                 />
                 <span style={styles.sliderValue}>{maxColors}</span>
