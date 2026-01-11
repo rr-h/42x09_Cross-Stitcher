@@ -1,11 +1,13 @@
-import { useState, useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   convertImageToPattern,
+  DEFAULT_OPTIONS,
   getImageDimensions,
   type ImageConversionOptions,
-  DEFAULT_OPTIONS,
 } from '../converters/imageToPattern';
 import { useGameStore } from '../store';
+
+declare const URL: typeof globalThis.URL;
 
 interface ImageImportModalProps {
   file: File;
@@ -159,7 +161,7 @@ export function ImageImportModal({ file, onClose }: ImageImportModalProps) {
                   value={maxWidth}
                   onChange={e => handleWidthChange(parseInt(e.target.value) || 1)}
                   min={1}
-                  max={500}
+                  max={1000}
                   style={styles.inputSmall}
                 />
               </div>
@@ -182,7 +184,7 @@ export function ImageImportModal({ file, onClose }: ImageImportModalProps) {
                   value={maxHeight}
                   onChange={e => handleHeightChange(parseInt(e.target.value) || 1)}
                   min={1}
-                  max={500}
+                  max={1000}
                   style={styles.inputSmall}
                 />
               </div>
