@@ -2,14 +2,13 @@ import type { PatternDoc, PaletteEntry, PatternMeta } from '../types';
 import { NO_STITCH } from '../types';
 import { hashString } from '../utils/hash';
 import {
-  DMC_COLORS_RGB,
+  DMC_COLORS,
   hexToRgb,
   rgbToHex,
   colorDistance,
+  findClosestDMCWithDistance,
   type DMCColor,
 } from '../data/dmcColors';
-
-const SYMBOLS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz@#$%&*+-=~^<>!?/|';
 
 export interface ImageConversionOptions {
   maxWidth: number;
@@ -26,6 +25,10 @@ export const DEFAULT_OPTIONS: ImageConversionOptions = {
   useDMCColors: true,
 };
 
+// Fallback symbols for non-DMC colours (quantised without DMC mapping)
+const FALLBACK_SYMBOLS =
+  '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz@#$%&*+-=~^<>!?/|';
+
 interface ColorCount {
   rgb: [number, number, number];
   count: number;
@@ -41,7 +44,7 @@ interface ColorBox {
   bMax: number;
 }
 
-// Load image from file and return ImageData at target dimensions
+// Load image from file and return HTMLImageElement
 async function loadImage(file: File): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -72,11 +75,7 @@ function calculateDimensions(
 }
 
 // Get pixel data from image at target dimensions
-function getImagePixels(
-  img: HTMLImageElement,
-  width: number,
-  height: number
-): ImageData {
+function getImagePixels(img: HTMLImageElement, width: number, height: number): ImageData {
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
@@ -90,7 +89,7 @@ function getImagePixels(
   return ctx.getImageData(0, 0, width, height);
 }
 
-// Extract unique colors from image data with counts
+// Extract unique colours from image data with counts
 function extractColors(imageData: ImageData): Map<string, ColorCount> {
   const colorMap = new Map<string, ColorCount>();
   const data = imageData.data;
@@ -116,11 +115,14 @@ function extractColors(imageData: ImageData): Map<string, ColorCount> {
   return colorMap;
 }
 
-// Calculate bounds for a box of colors
+// Calculate bounds for a box of colours
 function calculateBounds(colors: ColorCount[]): Omit<ColorBox, 'colors'> {
-  let rMin = 255, rMax = 0;
-  let gMin = 255, gMax = 0;
-  let bMin = 255, bMax = 0;
+  let rMin = 255,
+    rMax = 0;
+  let gMin = 255,
+    gMax = 0;
+  let bMin = 255,
+    bMax = 0;
 
   for (const { rgb } of colors) {
     rMin = Math.min(rMin, rgb[0]);
@@ -134,14 +136,14 @@ function calculateBounds(colors: ColorCount[]): Omit<ColorBox, 'colors'> {
   return { rMin, rMax, gMin, gMax, bMin, bMax };
 }
 
-// Median Cut color quantization algorithm
+// Median Cut colour quantisation algorithm
 function medianCut(colors: ColorCount[], numColors: number): [number, number, number][] {
   if (colors.length === 0) return [];
   if (colors.length <= numColors) {
     return colors.map(c => c.rgb);
   }
 
-  // Initialize with one box containing all colors
+  // Initialise with one box containing all colours
   const initialBounds = calculateBounds(colors);
   const boxes: ColorBox[] = [{ colors, ...initialBounds }];
 
@@ -213,9 +215,12 @@ function medianCut(colors: ColorCount[], numColors: number): [number, number, nu
     }
   }
 
-  // Calculate average color for each box (weighted by pixel count)
+  // Calculate average colour for each box (weighted by pixel count)
   return boxes.map(box => {
-    let totalR = 0, totalG = 0, totalB = 0, totalCount = 0;
+    let totalR = 0,
+      totalG = 0,
+      totalB = 0,
+      totalCount = 0;
     for (const { rgb, count } of box.colors) {
       totalR += rgb[0] * count;
       totalG += rgb[1] * count;
@@ -230,7 +235,7 @@ function medianCut(colors: ColorCount[], numColors: number): [number, number, nu
   });
 }
 
-// Map a color to the closest palette color
+// Map a colour to the closest palette colour index
 function findClosestPaletteIndex(
   rgb: [number, number, number],
   palette: [number, number, number][]
@@ -249,32 +254,31 @@ function findClosestPaletteIndex(
   return closestIndex;
 }
 
-// Map quantized colors to closest DMC colors
+// Map quantised colours to closest DMC colours, avoiding duplicates where possible
 function mapToDMC(
   quantizedColors: [number, number, number][]
 ): { dmc: DMCColor; originalRgb: [number, number, number] }[] {
-  const usedDMC = new Set<string>();
+  const usedCodes = new Set<string>();
   const result: { dmc: DMCColor; originalRgb: [number, number, number] }[] = [];
 
   for (const rgb of quantizedColors) {
-    let minDist = Infinity;
-    let closestDMC: DMCColor | null = null;
+    let bestDMC: DMCColor | null = null;
+    let bestDist = Infinity;
 
-    for (const { color, rgb: dmcRgb } of DMC_COLORS_RGB) {
-      // Prefer unused colors, but allow duplicates if no good alternative
-      const alreadyUsed = usedDMC.has(color.code);
-      const dist = colorDistance(rgb, dmcRgb);
-      const adjustedDist = alreadyUsed ? dist * 1.5 : dist;
+    // Find closest DMC, penalising already-used colours
+    for (const dmc of DMC_COLORS) {
+      const dist = colorDistance(rgb, dmc.rgb);
+      const adjustedDist = usedCodes.has(dmc.code) ? dist * 1.5 : dist;
 
-      if (adjustedDist < minDist) {
-        minDist = adjustedDist;
-        closestDMC = color;
+      if (adjustedDist < bestDist) {
+        bestDist = adjustedDist;
+        bestDMC = dmc;
       }
     }
 
-    if (closestDMC) {
-      usedDMC.add(closestDMC.code);
-      result.push({ dmc: closestDMC, originalRgb: rgb });
+    if (bestDMC) {
+      usedCodes.add(bestDMC.code);
+      result.push({ dmc: bestDMC, originalRgb: rgb });
     }
   }
 
@@ -298,18 +302,19 @@ export async function convertImageToPattern(
   const imageData = getImagePixels(img, width, height);
   URL.revokeObjectURL(img.src);
 
-  // Extract unique colors
+  // Extract unique colours
   const colorMap = extractColors(imageData);
   const colorCounts = Array.from(colorMap.values());
 
-  // Quantize colors
+  // Quantise colours using median cut
   const quantizedColors = medianCut(colorCounts, options.maxColors);
 
   // Build palette
   let palette: PaletteEntry[];
+  let paletteRgb: [number, number, number][];
 
   if (options.useDMCColors) {
-    // Map to DMC colors
+    // Map to DMC colours, using built-in DMC symbols
     const dmcMappings = mapToDMC(quantizedColors);
 
     palette = dmcMappings.map((mapping, i) => ({
@@ -319,27 +324,26 @@ export async function convertImageToPattern(
       brand: 'DMC',
       code: mapping.dmc.code,
       hex: mapping.dmc.hex,
-      symbol: SYMBOLS[i % SYMBOLS.length],
+      symbol: mapping.dmc.symbol,
       totalTargets: 0,
     }));
+
+    paletteRgb = dmcMappings.map(m => m.dmc.rgb);
   } else {
-    // Use quantized colors directly
+    // Use quantised colours directly with fallback symbols
     palette = quantizedColors.map((rgb, i) => ({
       paletteIndex: i,
       paletteId: `color-${i}`,
-      name: `Color ${i + 1}`,
+      name: `Colour ${i + 1}`,
       hex: rgbToHex(rgb[0], rgb[1], rgb[2]),
-      symbol: SYMBOLS[i % SYMBOLS.length],
+      symbol: FALLBACK_SYMBOLS[i % FALLBACK_SYMBOLS.length],
       totalTargets: 0,
     }));
+
+    paletteRgb = quantizedColors;
   }
 
-  // Build palette lookup (map quantized color index to final palette)
-  const paletteRgb: [number, number, number][] = options.useDMCColors
-    ? palette.map(p => hexToRgb(p.hex))
-    : quantizedColors;
-
-  // Create targets array - map each pixel to closest palette color
+  // Create targets array: map each pixel to closest palette colour
   const targets = new Uint16Array(width * height);
   const data = imageData.data;
 
@@ -354,23 +358,13 @@ export async function convertImageToPattern(
       const cellIndex = y * width + x;
 
       if (a < 128) {
-        // Transparent pixel - no stitch
+        // Transparent pixel, no stitch
         targets[cellIndex] = NO_STITCH;
       } else {
-        // Find closest quantized color first
-        const quantizedIndex = findClosestPaletteIndex([r, g, b], quantizedColors);
-
-        // If using DMC, map through the DMC palette
-        if (options.useDMCColors) {
-          targets[cellIndex] = findClosestPaletteIndex(
-            quantizedColors[quantizedIndex],
-            paletteRgb
-          );
-        } else {
-          targets[cellIndex] = quantizedIndex;
-        }
-
-        palette[targets[cellIndex]].totalTargets++;
+        // Find closest palette colour directly
+        const paletteIdx = findClosestPaletteIndex([r, g, b], paletteRgb);
+        targets[cellIndex] = paletteIdx;
+        palette[paletteIdx].totalTargets++;
       }
     }
   }
@@ -393,7 +387,7 @@ export async function convertImageToPattern(
 
     const entry = { ...palette[oldIndex] };
     entry.paletteIndex = newIndex;
-    entry.symbol = SYMBOLS[newIndex % SYMBOLS.length];
+    // Keep the original DMC symbol (no re-assignment needed)
     newPalette.push(entry);
   }
 
@@ -412,7 +406,7 @@ export async function convertImageToPattern(
   const meta: PatternMeta = {
     title: options.title || file.name.replace(/\.[^/.]+$/, ''),
     author: 'Image Converter',
-    instructions: `Converted from ${file.name} (${img.width}x${img.height} -> ${width}x${height})`,
+    instructions: `Converted from ${file.name} (${img.width}x${img.height} to ${width}x${height})`,
     stitchesPerInch: 14,
   };
 
@@ -428,7 +422,14 @@ export async function convertImageToPattern(
 
 // Check if a file is a supported image type
 export function isImageFile(file: File): boolean {
-  const imageTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/webp', 'image/bmp'];
+  const imageTypes = [
+    'image/png',
+    'image/jpeg',
+    'image/jpg',
+    'image/gif',
+    'image/webp',
+    'image/bmp',
+  ];
   return imageTypes.includes(file.type);
 }
 
