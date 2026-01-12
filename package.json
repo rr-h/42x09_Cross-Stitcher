@@ -4,7 +4,7 @@
   "description": "Cross-Stitch Pattern Game Web App",
   "type": "module",
   "scripts": {
-    "postinstall": "npx playwright install --with-deps",
+    "postinstall": "npx playwright install",
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
