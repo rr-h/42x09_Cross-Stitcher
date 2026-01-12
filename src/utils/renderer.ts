@@ -96,7 +96,8 @@ function drawThreadStrand(
   y1: number,
   thickness: number,
   color: string,
-  variationSeed: number
+  variationSeed: number,
+  isTopStrand: boolean = false
 ): void {
   const { r, g, b } = hexToRgb(color);
 
@@ -112,7 +113,7 @@ function drawThreadStrand(
   // Create gradient perpendicular to thread for cylinder effect
   const midX = (x0 + x1) / 2;
   const midY = (y0 + y1) / 2;
-  const gradOffset = thickness * 0.8;
+  const gradOffset = thickness * 0.9;
 
   const gradient = ctx.createLinearGradient(
     midX + nx * gradOffset,
@@ -121,20 +122,42 @@ function drawThreadStrand(
     midY - ny * gradOffset
   );
 
-  // Cylinder shading - bright highlight, main color, shadow
-  const highlightR = Math.min(255, r + 100);
-  const highlightG = Math.min(255, g + 100);
-  const highlightB = Math.min(255, b + 100);
+  // Enhanced cylinder shading with more pronounced highlights and shadows
+  const highlightR = Math.min(255, r + 120);
+  const highlightG = Math.min(255, g + 120);
+  const highlightB = Math.min(255, b + 120);
 
-  const shadowR = Math.max(0, r - 80);
-  const shadowG = Math.max(0, g - 80);
-  const shadowB = Math.max(0, b - 80);
+  const midHighR = Math.min(255, r + 60);
+  const midHighG = Math.min(255, g + 60);
+  const midHighB = Math.min(255, b + 60);
 
-  gradient.addColorStop(0, rgbToString(highlightR, highlightG, highlightB));
-  gradient.addColorStop(0.25, rgbToString(r + 30, g + 30, b + 30));
+  const midShadowR = Math.max(0, r - 40);
+  const midShadowG = Math.max(0, g - 40);
+  const midShadowB = Math.max(0, b - 40);
+
+  const shadowR = Math.max(0, r - 100);
+  const shadowG = Math.max(0, g - 100);
+  const shadowB = Math.max(0, b - 100);
+
+  // More complex gradient for better roundness
+  gradient.addColorStop(0, rgbToString(highlightR, highlightG, highlightB, 0.95));
+  gradient.addColorStop(0.15, rgbToString(midHighR, midHighG, midHighB));
+  gradient.addColorStop(0.35, color);
   gradient.addColorStop(0.5, color);
-  gradient.addColorStop(0.75, rgbToString(r - 20, g - 20, b - 20));
-  gradient.addColorStop(1, rgbToString(shadowR, shadowG, shadowB));
+  gradient.addColorStop(0.65, rgbToString(midShadowR, midShadowG, midShadowB));
+  gradient.addColorStop(0.85, rgbToString(shadowR, shadowG, shadowB));
+  gradient.addColorStop(1, rgbToString(shadowR, shadowG, shadowB, 0.9));
+
+  // Draw ambient occlusion shadow at edges (darker at fabric contact points)
+  if (!isTopStrand) {
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.15)';
+    ctx.lineWidth = thickness * 1.1;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(x0, y0);
+    ctx.lineTo(x1, y1);
+    ctx.stroke();
+  }
 
   // Draw main thread body
   ctx.strokeStyle = gradient;
@@ -147,16 +170,51 @@ function drawThreadStrand(
   ctx.lineTo(x1, y1);
   ctx.stroke();
 
-  // Add specular highlight
-  const highlightThickness = thickness * 0.15;
-  const highlightDist = thickness * (0.25 + variationSeed * 0.1);
+  // Add primary specular highlight along the thread
+  const highlightThickness = thickness * 0.2;
+  const highlightDist = thickness * (0.3 + variationSeed * 0.05);
 
-  ctx.strokeStyle = rgbToString(255, 255, 255, 0.4);
+  ctx.strokeStyle = rgbToString(255, 255, 255, 0.6);
   ctx.lineWidth = highlightThickness;
+  ctx.lineCap = 'round';
   ctx.beginPath();
   ctx.moveTo(x0 + nx * highlightDist, y0 + ny * highlightDist);
   ctx.lineTo(x1 + nx * highlightDist, y1 + ny * highlightDist);
   ctx.stroke();
+
+  // Add secondary specular highlight for more depth
+  const highlight2Thickness = thickness * 0.12;
+  const highlight2Dist = thickness * (0.35 + variationSeed * 0.08);
+
+  ctx.strokeStyle = rgbToString(255, 255, 255, 0.35);
+  ctx.lineWidth = highlight2Thickness;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(x0 + nx * highlight2Dist, y0 + ny * highlight2Dist);
+  ctx.lineTo(x1 + nx * highlight2Dist, y1 + ny * highlight2Dist);
+  ctx.stroke();
+
+  // Add texture highlights to simulate twisted/braided thread fibers
+  const numTextures = Math.max(2, Math.floor(len / (thickness * 2)));
+  ctx.strokeStyle = rgbToString(255, 255, 255, 0.15);
+  ctx.lineWidth = thickness * 0.08;
+  ctx.lineCap = 'round';
+
+  for (let i = 0; i < numTextures; i++) {
+    const t = (i + 0.5) / numTextures;
+    const tx = x0 + dx * t;
+    const ty = y0 + dy * t;
+
+    // Alternate sides for twisted appearance
+    const side = (i % 2 === 0) ? 1 : -1;
+    const texDist = thickness * 0.25 * side;
+    const texLen = thickness * 0.3;
+
+    ctx.beginPath();
+    ctx.moveTo(tx + nx * texDist - ny * texLen * 0.5, ty + ny * texDist + nx * texLen * 0.5);
+    ctx.lineTo(tx + nx * texDist + ny * texLen * 0.5, ty + ny * texDist - nx * texLen * 0.5);
+    ctx.stroke();
+  }
 }
 
 // Draw a realistic cross stitch with two crossing threads
@@ -179,7 +237,7 @@ function drawRealisticStitch(
   const y1 = screenY + cellScreenSize - padding;
 
   // Thread thickness - thicker for more realistic look
-  const baseThickness = Math.max(4, cellScreenSize * 0.33);
+  const baseThickness = Math.max(4, cellScreenSize * 0.35);
   const thickness1 = baseThickness * randoms.thickness1;
   const thickness2 = baseThickness * randoms.thickness2;
 
@@ -190,6 +248,10 @@ function drawRealisticStitch(
   const ox2 = randoms.offsetX2 * maxOffset;
   const oy2 = randoms.offsetY2 * maxOffset;
 
+  // Calculate center point for shadow
+  const centerX = screenX + cellScreenSize / 2;
+  const centerY = screenY + cellScreenSize / 2;
+
   // Draw first strand (bottom-left to top-right) - UNDER
   drawThreadStrand(
     ctx,
@@ -199,7 +261,30 @@ function drawRealisticStitch(
     y0 + oy1,
     thickness1,
     color,
-    randoms.highlight1
+    randoms.highlight1,
+    false
+  );
+
+  // Draw shadow where top thread crosses bottom thread
+  const shadowSize = Math.max(thickness2 * 1.3, baseThickness * 1.2);
+  const shadowGradient = ctx.createRadialGradient(
+    centerX,
+    centerY,
+    0,
+    centerX,
+    centerY,
+    shadowSize
+  );
+  shadowGradient.addColorStop(0, 'rgba(0, 0, 0, 0.25)');
+  shadowGradient.addColorStop(0.5, 'rgba(0, 0, 0, 0.12)');
+  shadowGradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+
+  ctx.fillStyle = shadowGradient;
+  ctx.fillRect(
+    centerX - shadowSize,
+    centerY - shadowSize,
+    shadowSize * 2,
+    shadowSize * 2
   );
 
   // Draw second strand (top-left to bottom-right) - OVER
@@ -212,7 +297,8 @@ function drawRealisticStitch(
     y1 + oy2,
     thickness2,
     color,
-    randoms.highlight2
+    randoms.highlight2,
+    true
   );
 }
 
