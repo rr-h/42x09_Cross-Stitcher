@@ -9,7 +9,7 @@ Fixes:
 - Symbol validation and repair:
   - Must be a single JS UTF-16 code unit (BMP, not surrogate pair)
   - No braille
-  - No whitespace/invisible
+  - No whitespace/invisible/combining
   - Must be unique
 """
 
@@ -57,10 +57,11 @@ def _is_good_symbol(ch: str) -> bool:
         return False
 
     # No whitespace / invisible formatting / combining
+    if ch.strip() == "":
+        return False
+
     cat = unicodedata.category(ch)
     if cat in ("Mn", "Me", "Cf", "Cc", "Cs"):
-        return False
-    if ch.strip() == "":
         return False
 
     # Avoid soft hyphen
@@ -70,52 +71,90 @@ def _is_good_symbol(ch: str) -> bool:
     return True
 
 
+# Known emoji-ish BMP codepoints we want to avoid (even though BMP and length==1).
+# Keep this minimal. We also avoid entire emoji-heavy blocks by not including them.
+_EMOJIISH_BMP: set[int] = {
+    0x231A, 0x231B,
+    0x23E9, 0x23EA, 0x23EB, 0x23EC, 0x23ED, 0x23EE,
+    0x23EF, 0x23F0, 0x23F1, 0x23F2, 0x23F3,
+    0x23F8, 0x23F9, 0x23FA,
+}
+
+
 def _generate_symbol_pool(target_count: int = 1200) -> list[str]:
-    candidates: list[int] = []
+    """
+    Generate a deterministic pool of code-safe symbols.
+
+    Rules:
+    - BMP only (so JS string length is 1)
+    - No braille
+    - No whitespace/invisible/combining
+    - Avoid emoji-heavy blocks (do not include U+2600 and above)
+    """
+    ranges: list[tuple[int, int]] = []
 
     # Printable ASCII (no space, no backslash)
-    for cp in range(0x21, 0x7F):
-        if cp == 0x5C:
-            continue
-        candidates.append(cp)
+    ranges.append((0x21, 0x7F))
 
-    # Latin-1 supplement (exclude soft hyphen)
-    for cp in range(0x00A1, 0x0100):
-        if cp == 0x00AD:
-            continue
-        candidates.append(cp)
+    # Latin-1 supplement (exclude soft hyphen later)
+    ranges.append((0x00A1, 0x0100))
 
-    # Latin Extended-A, Greek, Cyrillic
-    candidates.extend(range(0x0100, 0x0180))
-    candidates.extend(range(0x0370, 0x0400))
-    candidates.extend(range(0x0400, 0x0500))
+    # Latin Extended-A/B, IPA Extensions, Spacing Modifier Letters
+    ranges.append((0x0100, 0x0180))
+    ranges.append((0x0180, 0x0250))
+    ranges.append((0x0250, 0x02B0))
+    ranges.append((0x02B0, 0x0300))
 
-    # Box drawing, block elements, geometric
-    candidates.extend(range(0x2500, 0x2580))
-    candidates.extend(range(0x2580, 0x25A0))
-    candidates.extend(range(0x25A0, 0x2600))
+    # Greek, Cyrillic
+    ranges.append((0x0370, 0x0400))
+    ranges.append((0x0400, 0x0500))
+
+    # General Punctuation, Superscripts/Subscripts, Currency, Letterlike, Number forms
+    ranges.append((0x2000, 0x2070))
+    ranges.append((0x2070, 0x20A0))
+    ranges.append((0x20A0, 0x20D0))
+    ranges.append((0x2100, 0x2150))
+    ranges.append((0x2150, 0x2190))
+
+    # Arrows, Math operators, Misc Technical
+    ranges.append((0x2190, 0x2200))
+    ranges.append((0x2200, 0x2300))
+    ranges.append((0x2300, 0x2400))
+
+    # Box drawing, block elements, geometric shapes
+    ranges.append((0x2500, 0x2580))
+    ranges.append((0x2580, 0x25A0))
+    ranges.append((0x25A0, 0x2600))  # stop before emoji-heavy U+2600+
 
     out: list[str] = []
     seen: set[str] = set()
 
-    for cp in candidates:
-        ch = chr(cp)
-        if ch in seen:
-            continue
-        if not _is_good_symbol(ch):
-            continue
-        # Only take letters, numbers, punctuation, symbols
-        cat = unicodedata.category(ch)
-        if not (cat.startswith("L") or cat.startswith("N") or cat.startswith("P") or cat.startswith("S")):
-            continue
-        out.append(ch)
-        seen.add(ch)
-        if len(out) >= target_count:
-            break
+    for start, end in ranges:
+        for cp in range(start, end):
+            if cp == 0x5C:  # backslash
+                continue
+            if cp == 0x00AD:  # soft hyphen
+                continue
+            if cp in _EMOJIISH_BMP:
+                continue
 
-    if len(out) < target_count:
-        raise RuntimeError(f"Symbol pool too small: {len(out)} < {target_count}")
-    return out
+            ch = chr(cp)
+            if ch in seen:
+                continue
+            if not _is_good_symbol(ch):
+                continue
+
+            # Prefer letters, numbers, punctuation, symbols
+            cat = unicodedata.category(ch)
+            if not (cat.startswith("L") or cat.startswith("N") or cat.startswith("P") or cat.startswith("S")):
+                continue
+
+            out.append(ch)
+            seen.add(ch)
+            if len(out) >= target_count:
+                return out
+
+    raise RuntimeError(f"Symbol pool too small: {len(out)} < {target_count}")
 
 
 _SYMBOL_POOL = _generate_symbol_pool(1200)
@@ -161,9 +200,7 @@ def _normalise_hex(hex_str: str) -> str:
 
 
 def _strip_ts_comments(text: str) -> str:
-    # Remove /* ... */ first
     text = re.sub(r"/\*.*?\*/", "", text, flags=re.DOTALL)
-    # Remove // ... endline
     text = re.sub(r"//[^\n\r]*", "", text)
     return text
 
@@ -173,12 +210,10 @@ def _find_array_slice(text: str, anchor_re: re.Pattern[str]) -> str:
     if not m:
         raise RuntimeError("Could not find DMC_COLORS array anchor in dmcColors.ts")
 
-    # Find first '[' after anchor
     i = text.find("[", m.end())
     if i < 0:
         raise RuntimeError("Could not find '[' after DMC_COLORS anchor")
 
-    # Scan to matching closing ']' respecting strings
     depth = 0
     in_str: Optional[str] = None
     esc = False
@@ -214,7 +249,6 @@ def _find_array_slice(text: str, anchor_re: re.Pattern[str]) -> str:
 
 
 def _split_top_level_objects(array_text: str) -> list[str]:
-    # array_text includes outer [ ... ]
     s = array_text.strip()
     if not (s.startswith("[") and s.endswith("]")):
         raise ValueError("array_text is not a bracketed array")
@@ -290,7 +324,6 @@ def _parse_dmc_colors_ts(ts_path: Path) -> list[DMCColor]:
     raw = ts_path.read_text(encoding="utf-8")
     text = _strip_ts_comments(raw)
 
-    # Anchor around export const DMC_COLORS
     anchor = re.compile(r"\bexport\s+const\s+DMC_COLORS\b|\bconst\s+DMC_COLORS\b")
     array_text = _find_array_slice(text, anchor)
 
@@ -401,3 +434,4 @@ def get_color_count() -> int:
 
 if __name__ == "__main__":
     print(f"Loaded DMC colours: {len(DMC_COLORS)}")
+    print(f"Symbol pool size: {len(_SYMBOL_POOL)}")

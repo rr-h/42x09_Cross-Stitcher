@@ -16,6 +16,7 @@ import argparse
 import math
 import os
 import sys
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -62,6 +63,7 @@ def _parse_size_limit(value: str) -> tuple[str, float]:
         raise argparse.ArgumentTypeError(f"Invalid pixel value: {value}") from e
     if px <= 0:
         raise argparse.ArgumentTypeError(f"Pixel value must be > 0: {value}")
+        return ("px", float(px))
     return ("px", float(px))
 
 
@@ -116,11 +118,8 @@ def _quantise_opaque_pixels(
     if opaque_rgb.size == 0:
         return []
 
-    # Optional sampling for palette discovery only
     work_rgb = _maybe_sample_pixels(opaque_rgb, palette_sample_max)
 
-    # For small images, an exact unique check can shortcut
-    # For large images, np.unique becomes expensive, so skip it.
     n = int(work_rgb.shape[0])
     if n <= 250_000:
         packed = (
@@ -138,7 +137,6 @@ def _quantise_opaque_pixels(
                 out.append(QuantisedColour(rgb=rgb, count=int(counts[i])))
             return out
 
-    # Build a tile image for Pillow quantize
     tile_w = min(2048, max(1, int(math.sqrt(n))))
     tile_h = int(math.ceil(n / tile_w))
 
@@ -477,28 +475,29 @@ def write_oxs_file(pattern_doc: dict, output_path: str) -> None:
         f.write("</chart>")
 
 
-def _process_one(image_path: str, args: argparse.Namespace) -> int:
+def _process_one(image_path: str, args_dict: dict) -> int:
     try:
         doc = convert_image_to_pattern(
             image_path,
-            title=args.title,
-            resize=args.resize,
-            max_width=args.max_width,
-            max_height=args.max_height,
-            max_colors=args.max_colors,
-            use_dmc_colors=args.use_dmc_colors,
-            quantise_method=args.quantise_method,
-            alpha_threshold=args.alpha_threshold,
-            palette_sample_max=args.palette_sample_max,
+            title=args_dict["title"],
+            resize=args_dict["resize"],
+            max_width=args_dict["max_width"],
+            max_height=args_dict["max_height"],
+            max_colors=args_dict["max_colors"],
+            use_dmc_colors=args_dict["use_dmc_colors"],
+            quantise_method=args_dict["quantise_method"],
+            alpha_threshold=args_dict["alpha_threshold"],
+            palette_sample_max=args_dict["palette_sample_max"],
         )
     except Exception as e:
         print(f"Error processing {image_path}: {e}", file=sys.stderr)
         return 1
 
     base_name = Path(image_path).stem + ".oxs"
-    if args.output_dir:
-        Path(args.output_dir).mkdir(parents=True, exist_ok=True)
-        out_path = str(Path(args.output_dir) / base_name)
+    output_dir = args_dict["output_dir"]
+    if output_dir:
+        Path(output_dir).mkdir(parents=True, exist_ok=True)
+        out_path = str(Path(output_dir) / base_name)
     else:
         out_path = str(Path(image_path).with_suffix(".oxs"))
 
@@ -515,7 +514,7 @@ def _process_one(image_path: str, args: argparse.Namespace) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Convert images to OXS patterns (fast, app-compatible).")
     parser.add_argument("files", nargs="+", help="Image files to convert")
-    parser.add_argument("--title", type=str, default=None, help="Optional title (default: filename stem)")
+    parser.add_argument("--title", type=str, default=None)
     parser.add_argument("--max-width", type=_parse_size_limit, default=_parse_size_limit("900"))
     parser.add_argument("--max-height", type=_parse_size_limit, default=_parse_size_limit("900"))
     parser.add_argument("--max-colors", type=int, default=490)
@@ -527,7 +526,6 @@ def main() -> int:
         type=str,
         default="median-cut",
         choices=["median-cut", "octree"],
-        help="median-cut is more accurate; octree is faster",
     )
     parser.add_argument("--alpha-threshold", type=int, default=128)
     parser.add_argument("--jobs", type=int, default=1)
@@ -563,15 +561,28 @@ def main() -> int:
     if args.use_dmc_colors and args.max_colors > len(DMC_COLORS):
         args.max_colors = len(DMC_COLORS)
 
+    args_dict = {
+        "title": args.title,
+        "resize": args.resize,
+        "max_width": args.max_width,
+        "max_height": args.max_height,
+        "max_colors": args.max_colors,
+        "use_dmc_colors": args.use_dmc_colors,
+        "quantise_method": args.quantise_method,
+        "alpha_threshold": args.alpha_threshold,
+        "output_dir": args.output_dir,
+        "palette_sample_max": args.palette_sample_max,
+    }
+
     if args.jobs == 1 or len(files) == 1:
         failures = 0
         for p in files:
-            failures += _process_one(p, args)
+            failures += _process_one(p, args_dict)
         return 1 if failures else 0
 
     import multiprocessing as mp
     with mp.Pool(processes=args.jobs) as pool:
-        results = pool.starmap(_process_one, [(p, args) for p in files])
+        results = pool.starmap(_process_one, [(p, args_dict) for p in files])
     return 1 if any(results) else 0
 
 
