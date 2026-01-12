@@ -1,25 +1,13 @@
 #!/usr/bin/env python3
-"""image_to_pattern.py
+"""
+image_to_pattern.py
 
-Batch converter for images to OXS cross-stitch patterns.
+Convert images to OXS cross-stitch patterns (app-compatible).
 
-Dev-only tooling intended to generate OXS patterns that the app can import.
-
-Compatibility:
-- OXS structure: <chart><properties/><palette/><fullstitches/></chart>
-- Palette entries:
-  - cloth entry: index="0" number="cloth" name="cloth" color="ffffff"
-  - thread entries: index="1..N"
-    - number="DMC {code}" when DMC mapping is enabled
-    - name, color (hex without '#'), symbol (single JS UTF-16 code unit)
-- Stitch entries:
-  - x, y
-  - palindex="paletteIndex+1" (cloth is 0 and not used)
-
-Performance:
-- Avoid per-pixel Python loops (NumPy + Pillow quantisation).
-- Stream XML output (no ElementTree DOM for millions of stitches).
-
+Performance mechanisms:
+- --jobs N : parallelise across multiple input files
+- --palette-sample-max N : cap pixels used for palette discovery (0 = use all)
+- --quantise-method octree : faster palette quantisation (less accurate than median-cut)
 """
 
 from __future__ import annotations
@@ -34,7 +22,6 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageOps
 
-# Pillow compatibility: Dither.NONE is not present in older Pillow.
 try:
     DITHER_NONE = Image.Dither.NONE  # type: ignore[attr-defined]
 except AttributeError:
@@ -110,36 +97,57 @@ class QuantisedColour:
     count: int
 
 
-def _quantise_opaque_pixels(opaque_rgb: np.ndarray, max_colors: int, method: str) -> list[QuantisedColour]:
+def _maybe_sample_pixels(rgb_pixels: np.ndarray, max_samples: int) -> np.ndarray:
+    if max_samples <= 0:
+        return rgb_pixels
+    n = int(rgb_pixels.shape[0])
+    if n <= max_samples:
+        return rgb_pixels
+    stride = max(1, n // max_samples)
+    return rgb_pixels[::stride]
+
+
+def _quantise_opaque_pixels(
+    opaque_rgb: np.ndarray,
+    max_colors: int,
+    method: str,
+    palette_sample_max: int,
+) -> list[QuantisedColour]:
     if opaque_rgb.size == 0:
         return []
 
-    packed = (
-        (opaque_rgb[:, 0].astype(np.uint32) << 16)
-        | (opaque_rgb[:, 1].astype(np.uint32) << 8)
-        | opaque_rgb[:, 2].astype(np.uint32)
-    )
-    uniq, counts = np.unique(packed, return_counts=True)
+    # Optional sampling for palette discovery only
+    work_rgb = _maybe_sample_pixels(opaque_rgb, palette_sample_max)
 
-    if uniq.size <= max_colors:
-        order = np.argsort(-counts)
-        out: list[QuantisedColour] = []
-        for i in order:
-            val = int(uniq[i])
-            rgb = ((val >> 16) & 0xFF, (val >> 8) & 0xFF, val & 0xFF)
-            out.append(QuantisedColour(rgb=rgb, count=int(counts[i])))
-        return out
+    # For small images, an exact unique check can shortcut
+    # For large images, np.unique becomes expensive, so skip it.
+    n = int(work_rgb.shape[0])
+    if n <= 250_000:
+        packed = (
+            (work_rgb[:, 0].astype(np.uint32) << 16)
+            | (work_rgb[:, 1].astype(np.uint32) << 8)
+            | work_rgb[:, 2].astype(np.uint32)
+        )
+        uniq, counts = np.unique(packed, return_counts=True)
+        if uniq.size <= max_colors:
+            order = np.argsort(-counts)
+            out: list[QuantisedColour] = []
+            for i in order:
+                val = int(uniq[i])
+                rgb = ((val >> 16) & 0xFF, (val >> 8) & 0xFF, val & 0xFF)
+                out.append(QuantisedColour(rgb=rgb, count=int(counts[i])))
+            return out
 
-    n = int(opaque_rgb.shape[0])
+    # Build a tile image for Pillow quantize
     tile_w = min(2048, max(1, int(math.sqrt(n))))
     tile_h = int(math.ceil(n / tile_w))
 
     pad_n = tile_w * tile_h - n
     if pad_n > 0:
-        pad = np.repeat(opaque_rgb[:1, :], pad_n, axis=0)
-        flat = np.concatenate([opaque_rgb, pad], axis=0)
+        pad = np.repeat(work_rgb[:1, :], pad_n, axis=0)
+        flat = np.concatenate([work_rgb, pad], axis=0)
     else:
-        flat = opaque_rgb
+        flat = work_rgb
 
     img_arr = flat.reshape((tile_h, tile_w, 3)).astype(np.uint8)
     tmp_img = Image.fromarray(img_arr)
@@ -213,7 +221,7 @@ def _map_quantised_to_dmc(qcols: list[QuantisedColour]) -> list[dict]:
 
 
 def _assign_unique_symbols(palette: list[dict]) -> None:
-    pool = get_symbol_pool(max(600, len(palette) + 10))
+    pool = get_symbol_pool(max(800, len(palette) + 50))
     used: set[str] = set()
     pool_iter = iter(pool)
 
@@ -227,10 +235,13 @@ def _assign_unique_symbols(palette: list[dict]) -> None:
             return False
         if sym.strip() == "":
             return False
+        cat = unicodedata.category(sym)
+        if cat in ("Mn", "Me", "Cf", "Cc", "Cs"):
+            return False
         return True
 
     for p in palette:
-        sym = str(p.get("symbol", ""))
+        sym = str(p.get("symbol", "")).strip()
         if (not good(sym)) or (sym in used):
             while True:
                 cand = next(pool_iter)
@@ -247,6 +258,7 @@ def _build_palette_and_targets(
     use_dmc: bool,
     quantise_method: str,
     alpha_threshold: int,
+    palette_sample_max: int,
 ) -> tuple[list[dict], np.ndarray]:
     arr = np.array(img_rgba, dtype=np.uint8)
     h, w, _ = arr.shape
@@ -259,7 +271,12 @@ def _build_palette_and_targets(
     rgb = arr[:, :, :3]
     opaque_rgb = rgb[opaque_mask].reshape((-1, 3))
 
-    qcols = _quantise_opaque_pixels(opaque_rgb, max_colors=max_colors, method=quantise_method)
+    qcols = _quantise_opaque_pixels(
+        opaque_rgb,
+        max_colors=max_colors,
+        method=quantise_method,
+        palette_sample_max=palette_sample_max,
+    )
 
     if use_dmc:
         if max_colors > len(DMC_COLORS):
@@ -280,7 +297,10 @@ def _build_palette_and_targets(
         if max_colors > 490:
             raise RuntimeError("Custom palette max-colors > 490 is not supported (unique symbols required).")
         palette_rgb = [qc.rgb for qc in qcols]
-        palette = [{"name": f"Colour {i + 1}", "hex": f"#{rgb_val[0]:02X}{rgb_val[1]:02X}{rgb_val[2]:02X}", "symbol": ""} for i, rgb_val in enumerate(palette_rgb)]
+        palette = [
+            {"name": f"Colour {i + 1}", "hex": f"#{rgb_val[0]:02X}{rgb_val[1]:02X}{rgb_val[2]:02X}", "symbol": ""}
+            for i, rgb_val in enumerate(palette_rgb)
+        ]
 
     _assign_unique_symbols(palette)
 
@@ -332,6 +352,7 @@ def convert_image_to_pattern(
     use_dmc_colors: bool,
     quantise_method: str,
     alpha_threshold: int,
+    palette_sample_max: int,
 ) -> dict:
     try:
         img = Image.open(image_path)
@@ -363,6 +384,7 @@ def convert_image_to_pattern(
         use_dmc=use_dmc_colors,
         quantise_method=quantise_method,
         alpha_threshold=alpha_threshold,
+        palette_sample_max=palette_sample_max,
     )
     palette, targets = _prune_unused_palette(palette, targets)
 
@@ -442,13 +464,13 @@ def write_oxs_file(pattern_doc: dict, output_path: str) -> None:
         grid = targets.reshape((height, width))
         for y in range(height):
             row = grid[y]
-            cols = np.nonzero(row != NO_STITCH)[0]
+            cols = np.flatnonzero(row != NO_STITCH)
             if cols.size == 0:
                 continue
             parts: list[str] = []
-            for x in cols.tolist():
-                palindex = int(row[x]) + 1
-                parts.append(f'<stitch x="{x}" y="{y}" palindex="{palindex}"/>')
+            for x in cols:
+                palindex = int(row[int(x)]) + 1
+                parts.append(f'<stitch x="{int(x)}" y="{y}" palindex="{palindex}"/>')
             f.write("".join(parts))
 
         f.write("</fullstitches>")
@@ -467,6 +489,7 @@ def _process_one(image_path: str, args: argparse.Namespace) -> int:
             use_dmc_colors=args.use_dmc_colors,
             quantise_method=args.quantise_method,
             alpha_threshold=args.alpha_threshold,
+            palette_sample_max=args.palette_sample_max,
         )
     except Exception as e:
         print(f"Error processing {image_path}: {e}", file=sys.stderr)
@@ -490,41 +513,30 @@ def _process_one(image_path: str, args: argparse.Namespace) -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(
-        description="Convert images to OXS cross-stitch patterns (fast, app-compatible)."
-    )
+    parser = argparse.ArgumentParser(description="Convert images to OXS patterns (fast, app-compatible).")
     parser.add_argument("files", nargs="+", help="Image files to convert")
     parser.add_argument("--title", type=str, default=None, help="Optional title (default: filename stem)")
-    parser.add_argument(
-        "--max-width",
-        type=_parse_size_limit,
-        default=_parse_size_limit("900"),
-        help="Maximum pattern width in px or % (only with --resize)",
-    )
-    parser.add_argument(
-        "--max-height",
-        type=_parse_size_limit,
-        default=_parse_size_limit("900"),
-        help="Maximum pattern height in px or % (only with --resize)",
-    )
-    parser.add_argument("--max-colors", type=int, default=490, help="Maximum number of colours (default: 490)")
-    parser.add_argument("--no-dmc", action="store_false", dest="use_dmc_colors", help="Do not map to DMC colours")
-    parser.add_argument("--resize", action="store_true", help="Resize image to fit max-width/max-height")
-    parser.add_argument("--output-dir", "-o", type=str, default=None, help="Output directory (default: alongside input)")
+    parser.add_argument("--max-width", type=_parse_size_limit, default=_parse_size_limit("900"))
+    parser.add_argument("--max-height", type=_parse_size_limit, default=_parse_size_limit("900"))
+    parser.add_argument("--max-colors", type=int, default=490)
+    parser.add_argument("--no-dmc", action="store_false", dest="use_dmc_colors")
+    parser.add_argument("--resize", action="store_true")
+    parser.add_argument("--output-dir", "-o", type=str, default=None)
     parser.add_argument(
         "--quantise-method",
         type=str,
         default="median-cut",
         choices=["median-cut", "octree"],
-        help="Quantisation method (median-cut is more accurate; octree is faster)",
+        help="median-cut is more accurate; octree is faster",
     )
+    parser.add_argument("--alpha-threshold", type=int, default=128)
+    parser.add_argument("--jobs", type=int, default=1)
     parser.add_argument(
-        "--alpha-threshold",
+        "--palette-sample-max",
         type=int,
-        default=128,
-        help="Alpha threshold (0-255). Pixels with alpha < threshold become NO_STITCH (default: 128)",
+        default=0,
+        help="Max pixels used to discover palette (0 = use all, highest accuracy)",
     )
-    parser.add_argument("--jobs", type=int, default=1, help="Parallel jobs for multiple files (default: 1)")
     parser.set_defaults(use_dmc_colors=True, resize=False)
 
     args = parser.parse_args()
@@ -538,11 +550,13 @@ def main() -> int:
     if args.jobs <= 0:
         print("--jobs must be > 0", file=sys.stderr)
         return 2
+    if args.palette_sample_max < 0:
+        print("--palette-sample-max must be >= 0", file=sys.stderr)
+        return 2
 
     files = [f for f in args.files if os.path.isfile(f)]
     for m in [f for f in args.files if not os.path.isfile(f)]:
         print(f"File not found: {m}", file=sys.stderr)
-
     if not files:
         return 1
 
