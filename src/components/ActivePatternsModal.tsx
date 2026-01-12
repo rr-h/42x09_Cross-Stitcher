@@ -76,14 +76,19 @@ function generateProgressPreview(
 
 // Try to load pattern from IndexedDB or catalog
 async function tryLoadPattern(patternId: string): Promise<PatternDoc | null> {
+  console.log('[ActivePatterns] Trying to load pattern:', patternId);
+
   // First, try loading from IndexedDB (for uploaded patterns)
   try {
     const storedPattern = await loadStoredPattern(patternId);
     if (storedPattern) {
+      console.log('[ActivePatterns] Loaded pattern from IndexedDB:', storedPattern.id);
       return storedPattern;
+    } else {
+      console.log('[ActivePatterns] Pattern not found in IndexedDB');
     }
   } catch (err) {
-    console.error('Failed to load stored pattern:', err);
+    console.error('[ActivePatterns] Failed to load stored pattern:', err);
   }
 
   // If not in storage, try to load from catalog
@@ -93,14 +98,18 @@ async function tryLoadPattern(patternId: string): Promise<PatternDoc | null> {
     return patternId === baseFilename || patternId === entry.filename;
   });
 
-  if (!catalogEntry) return null;
+  if (!catalogEntry) {
+    console.log('[ActivePatterns] Pattern not found in catalog either');
+    return null;
+  }
 
   try {
+    console.log('[ActivePatterns] Loading pattern from catalog:', catalogEntry.filename);
     const content = await loadPatternFile(catalogEntry.filename);
     const pattern = await parseOXS(content);
     return pattern;
   } catch (err) {
-    console.error('Failed to load catalog pattern:', err);
+    console.error('[ActivePatterns] Failed to load catalog pattern:', err);
     return null;
   }
 }
