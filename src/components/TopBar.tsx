@@ -6,6 +6,7 @@ import { calculateFitViewport, clampViewport } from '../utils/coordinates';
 import { isImageFile } from '../converters/imageToPattern';
 import { ImageImportModal } from './ImageImportModal';
 import { PatternGalleryModal } from './PatternGalleryModal';
+import { AuthButton } from './AuthButton';
 
 export function TopBar() {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -249,8 +250,10 @@ export function TopBar() {
             <span className="progress-text" style={styles.progressText}>
               {isComplete ? 'Complete!' : `${progressPercent}%`}
             </span>
+            <div style={styles.separator} />
           </>
         )}
+        <AuthButton />
       </div>
 
       {imageFile && (

@@ -66,6 +66,8 @@ done
     "${SCRIPT_DIR}/src/store/" \
     "${SCRIPT_DIR}/src/types/" \
     "${SCRIPT_DIR}/src/utils/" \
+    "${SCRIPT_DIR}/src/symbols/" \
+    "${SCRIPT_DIR}/src/sync/" \
     "${SCRIPT_DIR}/src/App.tsx" \
     "${SCRIPT_DIR}/src/index.css" \
     "${SCRIPT_DIR}/src/main.tsx"
