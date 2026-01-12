@@ -137,6 +137,8 @@ button:active {
 }
 
 .topbar-title {
+  display: none;
+  visibility: hidden;
   font-size: 0.2rem;
   color: #666;
 }

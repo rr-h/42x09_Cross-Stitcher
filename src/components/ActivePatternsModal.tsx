@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useGameStore } from '../store';
-import { getAllPatternsWithProgress } from '../store/persistence';
+import { getAllPatternsWithProgress, deleteProgress, deleteLocalSnapshots } from '../store/persistence';
 import type { PatternDoc, UserProgress } from '../types';
 import { NO_STITCH } from '../types';
 import { patternCatalog, loadPatternFile } from '../data/patternCatalog';
@@ -93,10 +93,13 @@ async function tryLoadCatalogPattern(patternId: string): Promise<PatternDoc | nu
 function ActivePatternCard({
   item,
   onSelect,
+  onDelete,
 }: {
   item: ActivePatternItem;
   onSelect: (pattern: PatternDoc) => void;
+  onDelete: (patternId: string) => void;
 }) {
+  const [isHovered, setIsHovered] = useState(false);
   // Initialize loading based on whether we need to fetch the pattern
   const [state, setState] = useState(() => ({
     ...item,
@@ -150,6 +153,13 @@ function ActivePatternCard({
     }
   };
 
+  const handleDelete = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (confirm(`Delete progress for "${state.pattern?.meta.title || state.patternId}"?`)) {
+      onDelete(state.patternId);
+    }
+  };
+
   return (
     <div
       className="gallery-card"
@@ -160,6 +170,8 @@ function ActivePatternCard({
         position: 'relative',
       }}
       onClick={handleClick}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
       role="button"
       tabIndex={state.pattern ? 0 : -1}
       onKeyDown={e => e.key === 'Enter' && state.pattern && handleClick()}
@@ -188,6 +200,17 @@ function ActivePatternCard({
             <div style={styles.progressOverlay}>
               <div style={styles.progressBadge}>{state.progressPercent}%</div>
             </div>
+            {/* Delete button on hover */}
+            {isHovered && (
+              <button
+                onClick={handleDelete}
+                style={styles.deleteButton}
+                title="Delete progress"
+                aria-label="Delete progress"
+              >
+                ×
+              </button>
+            )}
           </>
         )}
       </div>
@@ -211,8 +234,8 @@ export function ActivePatternsModal({ onClose }: ActivePatternsModalProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingPattern, setIsLoadingPattern] = useState(false);
 
-  useEffect(() => {
-    // Load all patterns with progress
+  const loadActivePatterns = useCallback(() => {
+    setIsLoading(true);
     getAllPatternsWithProgress()
       .then(patterns => {
         const items: ActivePatternItem[] = patterns.map(p => ({
@@ -233,6 +256,10 @@ export function ActivePatternsModal({ onClose }: ActivePatternsModalProps) {
       });
   }, []);
 
+  useEffect(() => {
+    loadActivePatterns();
+  }, [loadActivePatterns]);
+
   const handleSelectPattern = useCallback(
     async (pattern: PatternDoc) => {
       setIsLoadingPattern(true);
@@ -249,6 +276,23 @@ export function ActivePatternsModal({ onClose }: ActivePatternsModalProps) {
       }
     },
     [loadPattern, onClose]
+  );
+
+  const handleDeleteProgress = useCallback(
+    async (patternId: string) => {
+      try {
+        // Delete both the progress and snapshots
+        await deleteProgress(patternId);
+        await deleteLocalSnapshots(patternId);
+
+        // Reload the active patterns list
+        loadActivePatterns();
+      } catch (error) {
+        console.error('Failed to delete progress:', error);
+        alert(`Failed to delete progress: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      }
+    },
+    [loadActivePatterns]
   );
 
   return (
@@ -285,6 +329,7 @@ export function ActivePatternsModal({ onClose }: ActivePatternsModalProps) {
                   key={item.patternId}
                   item={item}
                   onSelect={handleSelectPattern}
+                  onDelete={handleDeleteProgress}
                 />
               ))}
             </div>
@@ -424,8 +469,8 @@ const styles: Record<string, React.CSSProperties> = {
   },
   progressOverlay: {
     position: 'absolute',
-    top: '0.5rem',
-    right: '0.5rem',
+    bottom: '0.5rem',
+    left: '0.5rem',
   },
   progressBadge: {
     backgroundColor: 'rgba(74, 144, 217, 0.95)',
@@ -435,6 +480,27 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: '0.875rem',
     fontWeight: '600',
     boxShadow: '0 2px 4px rgba(0, 0, 0, 0.2)',
+  },
+  deleteButton: {
+    position: 'absolute',
+    top: '0.5rem',
+    right: '0.5rem',
+    width: '32px',
+    height: '32px',
+    borderRadius: '50%',
+    backgroundColor: 'rgba(220, 53, 69, 0.95)',
+    color: 'white',
+    border: 'none',
+    cursor: 'pointer',
+    fontSize: '1.5rem',
+    fontWeight: 'bold',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    lineHeight: '1',
+    boxShadow: '0 2px 6px rgba(0, 0, 0, 0.3)',
+    transition: 'all 0.2s',
+    zIndex: 2,
   },
   loadingPlaceholder: {
     display: 'flex',
