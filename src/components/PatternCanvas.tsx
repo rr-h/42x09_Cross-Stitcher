@@ -352,6 +352,48 @@ export function PatternCanvas() {
     [baseCursorStyle]
   );
 
+  // Handle double-click for flood fill (shortcut to avoid switching to fill tool)
+  const handleDoubleClick = useCallback(
+    (e: React.MouseEvent) => {
+      const rect = canvasRef.current?.getBoundingClientRect();
+      if (!rect || !pattern || !progress || isComplete) return;
+
+      // Only allow flood fill when in stitch mode (not picker mode)
+      if (toolMode === 'picker') return;
+
+      // Must have a color selected
+      if (selectedPaletteIndex === null) return;
+
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      const cell = screenToGrid(x, y, viewport);
+
+      // Check bounds
+      if (cell.col < 0 || cell.col >= pattern.width || cell.row < 0 || cell.row >= pattern.height) {
+        return;
+      }
+
+      const state = getStitchState(cell.col, cell.row);
+      const targetIdx = getTargetPaletteIndex(cell.col, cell.row);
+
+      // Only flood fill if cell is unstitched and matches selected color
+      if (state === StitchState.None && targetIdx === selectedPaletteIndex) {
+        floodFillStitch(cell.col, cell.row);
+      }
+    },
+    [
+      pattern,
+      progress,
+      viewport,
+      toolMode,
+      selectedPaletteIndex,
+      isComplete,
+      getStitchState,
+      getTargetPaletteIndex,
+      floodFillStitch,
+    ]
+  );
+
   // Handle wheel zoom
   const handleWheel = useCallback(
     (e: React.WheelEvent) => {
@@ -565,6 +607,7 @@ export function PatternCanvas() {
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
+        onDoubleClick={handleDoubleClick}
         onWheel={handleWheel}
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
