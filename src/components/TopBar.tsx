@@ -5,11 +5,13 @@ import type { ViewportTransform } from '../types';
 import { calculateFitViewport, clampViewport } from '../utils/coordinates';
 import { isImageFile } from '../converters/imageToPattern';
 import { ImageImportModal } from './ImageImportModal';
+import { PatternGalleryModal } from './PatternGalleryModal';
 
 export function TopBar() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const [imageFile, setImageFile] = useState<File | null>(null);
+  const [showGallery, setShowGallery] = useState(false);
 
   const pattern = useGameStore(s => s.pattern);
   const progress = useGameStore(s => s.progress);
@@ -158,6 +160,14 @@ export function TopBar() {
         >
           Import Image
         </button>
+        <button
+          onClick={() => setShowGallery(true)}
+          className="pick-pattern-button"
+          style={styles.galleryButton}
+          title="Browse and select from pre-loaded patterns"
+        >
+          Pick Pattern
+        </button>
 
         {pattern && (
           <span className="topbar-title">
@@ -246,6 +256,10 @@ export function TopBar() {
       {imageFile && (
         <ImageImportModal file={imageFile} onClose={handleCloseImageModal} />
       )}
+
+      {showGallery && (
+        <PatternGalleryModal onClose={() => setShowGallery(false)} />
+      )}
     </div>
   );
 }
@@ -264,6 +278,17 @@ const styles: Record<string, React.CSSProperties> = {
   imageButton: {
     padding: '0.5rem 1rem',
     backgroundColor: '#4A7A45',
+    color: 'white',
+    border: 'none',
+    borderRadius: '0.375rem',
+    cursor: 'pointer',
+    fontWeight: '500',
+    fontSize: '0.9rem',
+    marginLeft: '0.5rem',
+  },
+  galleryButton: {
+    padding: '0.5rem 1rem',
+    backgroundColor: '#5A8A55',
     color: 'white',
     border: 'none',
     borderRadius: '0.375rem',

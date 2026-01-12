@@ -385,6 +385,44 @@ button:active {
 }
 
 /* ============================================
+   PATTERN GALLERY STYLES
+   ============================================ */
+
+.gallery-card {
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.gallery-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.gallery-card:active {
+  transform: translateY(0);
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Gallery mobile styles */
+@media (max-width: 767px) {
+  .pick-pattern-button {
+    padding: 0.4rem 0.75rem !important;
+    font-size: 0.8rem !important;
+  }
+}
+
+@media (max-width: 479px) {
+  .pick-pattern-button {
+    padding: 0.3rem 0.5rem !important;
+    font-size: 0.75rem !important;
+  }
+}
+
+/* ============================================
    TOUCH DEVICE OPTIMIZATIONS
    ============================================ */
 @media (hover: none) and (pointer: coarse) {
