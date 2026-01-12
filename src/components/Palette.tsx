@@ -124,7 +124,7 @@ const styles: Record<string, React.CSSProperties> = {
   header: {
     padding: '1rem',
     fontWeight: 'bold',
-    fontSize: '1.1rem',
+    fontSize: '0.9rem',
     borderBottom: '1px solid #ddd',
     backgroundColor: '#f9f9f9',
   },
@@ -144,7 +144,7 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: '0.5rem',
     cursor: 'pointer',
     fontWeight: 'bold',
-    fontSize: '0.9rem',
+    fontSize: '0.8rem',
     transition: 'all 0.2s',
   },
   pickerButtonActive: {
@@ -152,7 +152,7 @@ const styles: Record<string, React.CSSProperties> = {
     borderColor: '#FF8C00',
   },
   pickerIcon: {
-    fontSize: '1.2rem',
+    fontSize: '0.9rem',
   },
   list: {
     flex: 1,
@@ -204,18 +204,18 @@ const styles: Record<string, React.CSSProperties> = {
     overflow: 'hidden',
   },
   name: {
-    fontSize: '0.85rem',
+    fontSize: '0.775rem',
     fontWeight: '500',
     whiteSpace: 'nowrap',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
   },
   code: {
-    fontSize: '0.75rem',
+    fontSize: '0.775rem',
     color: '#888',
   },
   count: {
-    fontSize: '0.9rem',
+    fontSize: '0.8rem',
     fontWeight: 'bold',
     color: '#666',
     backgroundColor: '#e0e0e0',

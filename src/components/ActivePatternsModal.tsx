@@ -1,47 +1,31 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { patternCatalog, loadPatternFile, type PatternCatalogEntry } from '../data/patternCatalog';
-import { parseOXS } from '../parsers/oxs';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useGameStore } from '../store';
 import { getAllPatternsWithProgress } from '../store/persistence';
-import type { PatternDoc } from '../types';
+import type { PatternDoc, UserProgress } from '../types';
 import { NO_STITCH } from '../types';
+import { patternCatalog, loadPatternFile } from '../data/patternCatalog';
+import { parseOXS } from '../parsers/oxs';
 
-interface PatternGalleryModalProps {
+interface ActivePatternsModalProps {
   onClose: () => void;
 }
 
-interface PreviewState {
+interface ActivePatternItem {
+  patternId: string;
+  progress: UserProgress;
+  progressPercent: number;
   pattern: PatternDoc | null;
+  previewDataUrl: string | null;
   loading: boolean;
   error: string | null;
-  previewDataUrl: string | null;
 }
 
-// Loading queue to limit concurrent pattern loads
-const loadingQueue: Array<() => Promise<void>> = [];
-let activeLoads = 0;
-const MAX_CONCURRENT_LOADS = 2;
-
-function processQueue() {
-  while (activeLoads < MAX_CONCURRENT_LOADS && loadingQueue.length > 0) {
-    const next = loadingQueue.shift();
-    if (next) {
-      activeLoads++;
-      next().finally(() => {
-        activeLoads--;
-        processQueue();
-      });
-    }
-  }
-}
-
-function queueLoad(loadFn: () => Promise<void>) {
-  loadingQueue.push(loadFn);
-  processQueue();
-}
-
-// Generate a preview image of a fully stitched pattern
-function generatePreviewImage(pattern: PatternDoc, maxSize: number = 150): string {
+// Generate a preview image showing current progress
+function generateProgressPreview(
+  pattern: PatternDoc,
+  progress: UserProgress,
+  maxSize: number = 150
+): string {
   const canvas = document.createElement('canvas');
 
   // Calculate scale to fit in maxSize while maintaining aspect ratio
@@ -59,7 +43,7 @@ function generatePreviewImage(pattern: PatternDoc, maxSize: number = 150): strin
   ctx.fillStyle = '#F5F0E8';
   ctx.fillRect(0, 0, width, height);
 
-  // Draw each cell with its target color (fully stitched preview)
+  // Draw each cell
   const cellWidth = width / pattern.width;
   const cellHeight = height / pattern.height;
 
@@ -67,16 +51,16 @@ function generatePreviewImage(pattern: PatternDoc, maxSize: number = 150): strin
     for (let col = 0; col < pattern.width; col++) {
       const cellIndex = row * pattern.width + col;
       const targetIndex = pattern.targets[cellIndex];
+      const stitchState = progress.stitchedState[cellIndex];
 
       if (targetIndex !== NO_STITCH && targetIndex < pattern.palette.length) {
-        const color = pattern.palette[targetIndex].hex;
-        ctx.fillStyle = color;
-        ctx.fillRect(
-          col * cellWidth,
-          row * cellHeight,
-          cellWidth + 0.5, // Small overlap to avoid gaps
-          cellHeight + 0.5
-        );
+        // If stitched correctly, show the color, otherwise show fabric
+        if (stitchState === 1) {
+          // StitchState.Correct
+          const color = pattern.palette[targetIndex].hex;
+          ctx.fillStyle = color;
+          ctx.fillRect(col * cellWidth, row * cellHeight, cellWidth + 0.5, cellHeight + 0.5);
+        }
       }
     }
   }
@@ -84,131 +68,103 @@ function generatePreviewImage(pattern: PatternDoc, maxSize: number = 150): strin
   return canvas.toDataURL('image/png');
 }
 
-// Cache for loaded patterns to avoid re-parsing
-const patternCache = new Map<string, { pattern: PatternDoc; previewDataUrl: string }>();
-
-function PatternPreviewCard({
-  entry,
-  onSelect,
-  onLoaded,
-  progressPercent,
-}: {
-  entry: PatternCatalogEntry;
-  onSelect: (pattern: PatternDoc) => void;
-  onLoaded?: () => void;
-  progressPercent?: number;
-}) {
-  const [state, setState] = useState<PreviewState>(() => {
-    // Check cache first
-    const cached = patternCache.get(entry.filename);
-    if (cached) {
-      return {
-        pattern: cached.pattern,
-        loading: false,
-        error: null,
-        previewDataUrl: cached.previewDataUrl,
-      };
-    }
-    return {
-      pattern: null,
-      loading: false,
-      error: null,
-      previewDataUrl: null,
-    };
+// Try to load pattern from catalog
+async function tryLoadCatalogPattern(patternId: string): Promise<PatternDoc | null> {
+  // Check if this pattern is in the catalog
+  const catalogEntry = patternCatalog.find(entry => {
+    // Pattern IDs are typically based on filename without extension
+    const baseFilename = entry.filename.replace(/\.oxs$/, '');
+    return patternId === baseFilename || patternId === entry.filename;
   });
 
-  const cardRef = useRef<HTMLDivElement>(null);
-  const loadStartedRef = useRef(false);
+  if (!catalogEntry) return null;
 
-  const startLoading = useCallback(() => {
-    if (loadStartedRef.current || state.pattern) return;
-    loadStartedRef.current = true;
+  try {
+    const content = await loadPatternFile(catalogEntry.filename);
+    const pattern = await parseOXS(content);
+    return pattern;
+  } catch (err) {
+    console.error('Failed to load catalog pattern:', err);
+    return null;
+  }
+}
 
-    setState(s => ({ ...s, loading: true }));
+// Active pattern card component
+function ActivePatternCard({
+  item,
+  onSelect,
+}: {
+  item: ActivePatternItem;
+  onSelect: (pattern: PatternDoc) => void;
+}) {
+  // Initialize loading based on whether we need to fetch the pattern
+  const [state, setState] = useState(() => ({
+    ...item,
+    loading: !item.pattern,
+  }));
 
-    queueLoad(async () => {
-      try {
-        const content = await loadPatternFile(entry.filename);
-        const pattern = await parseOXS(content);
-        const previewDataUrl = generatePreviewImage(pattern, 150);
+  useEffect(() => {
+    if (state.pattern) return;
 
-        // Cache the result
-        patternCache.set(entry.filename, { pattern, previewDataUrl });
+    let mounted = true;
 
-        setState({
-          pattern,
-          loading: false,
-          error: null,
-          previewDataUrl,
-        });
-        onLoaded?.();
-      } catch (err) {
-        setState({
-          pattern: null,
+    // Try to load the pattern
+    tryLoadCatalogPattern(state.patternId)
+      .then(pattern => {
+        if (!mounted) return;
+
+        if (pattern) {
+          const previewDataUrl = generateProgressPreview(pattern, state.progress, 150);
+          setState(s => ({
+            ...s,
+            pattern,
+            previewDataUrl,
+            loading: false,
+            error: null,
+          }));
+        } else {
+          setState(s => ({
+            ...s,
+            loading: false,
+            error: 'Pattern not found',
+          }));
+        }
+      })
+      .catch(err => {
+        if (!mounted) return;
+        setState(s => ({
+          ...s,
           loading: false,
           error: err instanceof Error ? err.message : 'Failed to load',
-          previewDataUrl: null,
-        });
-      }
-    });
-  }, [entry.filename, state.pattern, onLoaded]);
+        }));
+      });
 
-  // Lazy load using IntersectionObserver
-  useEffect(() => {
-    if (loadStartedRef.current || state.pattern) return;
-
-    const observer = new IntersectionObserver(
-      entries => {
-        if (entries[0].isIntersecting) {
-          observer.disconnect();
-          startLoading();
-        }
-      },
-      { rootMargin: '100px' } // Start loading slightly before visible
-    );
-
-    if (cardRef.current) {
-      observer.observe(cardRef.current);
-    }
-
-    return () => observer.disconnect();
-  }, [startLoading, state.pattern]);
+    return () => {
+      mounted = false;
+    };
+  }, [state.patternId, state.pattern, state.progress]);
 
   const handleClick = () => {
     if (state.pattern) {
       onSelect(state.pattern);
-    } else if (!state.loading && !state.error) {
-      // Start loading if not already started
-      startLoading();
     }
   };
 
-  // Format file size
-  const sizeLabel =
-    entry.sizeKB < 10000
-      ? `${Math.round(entry.sizeKB / 1000)}MB`
-      : `${Math.round(entry.sizeKB / 1000)}MB`;
-
   return (
     <div
-      ref={cardRef}
       className="gallery-card"
       style={{
         ...styles.card,
         opacity: state.pattern ? 1 : 0.8,
-        cursor: state.pattern ? 'pointer' : state.loading ? 'wait' : 'pointer',
+        cursor: state.pattern ? 'pointer' : state.loading ? 'wait' : 'default',
+        position: 'relative',
       }}
       onClick={handleClick}
       role="button"
-      tabIndex={0}
-      onKeyDown={e => e.key === 'Enter' && handleClick()}
+      tabIndex={state.pattern ? 0 : -1}
+      onKeyDown={e => e.key === 'Enter' && state.pattern && handleClick()}
     >
       <div style={styles.previewContainer}>
-        {!state.pattern && !state.loading && !state.error && (
-          <div style={styles.pendingPlaceholder}>
-            <span style={styles.pendingText}>Click to load</span>
-          </div>
-        )}
         {state.loading && (
           <div style={styles.loadingPlaceholder}>
             <div style={styles.spinner} />
@@ -218,67 +174,69 @@ function PatternPreviewCard({
         {state.error && (
           <div style={styles.errorPlaceholder}>
             <span style={styles.errorIcon}>!</span>
+            <span style={styles.errorText}>{state.error}</span>
           </div>
         )}
         {state.previewDataUrl && (
           <>
-            <img src={state.previewDataUrl} alt={entry.displayName} style={styles.previewImage} />
+            <img
+              src={state.previewDataUrl}
+              alt={state.pattern?.meta.title || state.patternId}
+              style={styles.previewImage}
+            />
             {/* Progress overlay */}
-            {progressPercent !== undefined && progressPercent > 0 && (
-              <div style={styles.progressOverlay}>
-                <div style={styles.progressBadge}>{progressPercent}%</div>
-              </div>
-            )}
+            <div style={styles.progressOverlay}>
+              <div style={styles.progressBadge}>{state.progressPercent}%</div>
+            </div>
           </>
         )}
       </div>
       <div style={styles.cardInfo}>
-        <div style={styles.cardTitle}>{entry.displayName}</div>
-        <div style={styles.cardMeta}>
-          {state.pattern ? (
+        <div style={styles.cardTitle}>{state.pattern?.meta.title || state.patternId}</div>
+        {state.pattern && (
+          <div style={styles.cardMeta}>
             <span>
               {state.pattern.width} x {state.pattern.height}
             </span>
-          ) : (
-            <span style={styles.sizeLabel}>{sizeLabel}</span>
-          )}
-        </div>
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-export function PatternGalleryModal({ onClose }: PatternGalleryModalProps) {
+export function ActivePatternsModal({ onClose }: ActivePatternsModalProps) {
   const loadPattern = useGameStore(s => s.loadPattern);
-  const [isLoading, setIsLoading] = useState(false);
-  const [loadedCount, setLoadedCount] = useState(patternCache.size);
-  const [progressMap, setProgressMap] = useState<Map<string, number>>(new Map());
+  const [activePatterns, setActivePatterns] = useState<ActivePatternItem[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingPattern, setIsLoadingPattern] = useState(false);
 
-  // Load all progress data on mount
   useEffect(() => {
+    // Load all patterns with progress
     getAllPatternsWithProgress()
       .then(patterns => {
-        const map = new Map<string, number>();
-        patterns.forEach(p => {
-          map.set(p.patternId, p.progressPercent);
-        });
-        setProgressMap(map);
+        const items: ActivePatternItem[] = patterns.map(p => ({
+          patternId: p.patternId,
+          progress: p.progress,
+          progressPercent: p.progressPercent,
+          pattern: null,
+          previewDataUrl: null,
+          loading: false,
+          error: null,
+        }));
+        setActivePatterns(items);
+        setIsLoading(false);
       })
       .catch(err => {
-        console.error('Failed to load progress data:', err);
+        console.error('Failed to load active patterns:', err);
+        setIsLoading(false);
       });
-  }, []);
-
-  // Update loaded count when cache changes
-  const incrementLoadedCount = useCallback(() => {
-    setLoadedCount(patternCache.size);
   }, []);
 
   const handleSelectPattern = useCallback(
     async (pattern: PatternDoc) => {
-      setIsLoading(true);
+      setIsLoadingPattern(true);
       try {
-        // Load the pattern - this will create fresh progress (unstitched)
         await loadPattern(pattern);
         onClose();
       } catch (error) {
@@ -287,7 +245,7 @@ export function PatternGalleryModal({ onClose }: PatternGalleryModalProps) {
           `Failed to load pattern: ${error instanceof Error ? error.message : 'Unknown error'}`
         );
       } finally {
-        setIsLoading(false);
+        setIsLoadingPattern(false);
       }
     },
     [loadPattern, onClose]
@@ -297,11 +255,8 @@ export function PatternGalleryModal({ onClose }: PatternGalleryModalProps) {
     <div style={styles.overlay} onClick={onClose}>
       <div style={styles.modal} onClick={e => e.stopPropagation()}>
         <div style={styles.header}>
-          <h2 style={styles.title}>Pick a Pattern</h2>
-          <div style={styles.loadedCounter}>
-            {loadedCount} / {patternCatalog.length} loaded
-          </div>
-          <button onClick={onClose} style={styles.closeButton} disabled={isLoading}>
+          <h2 style={styles.title}>Active Patterns</h2>
+          <button onClick={onClose} style={styles.closeButton} disabled={isLoadingPattern}>
             &times;
           </button>
         </div>
@@ -309,34 +264,41 @@ export function PatternGalleryModal({ onClose }: PatternGalleryModalProps) {
         <div style={styles.content}>
           {isLoading && (
             <div style={styles.loadingOverlay}>
+              <div style={styles.loadingMessage}>Loading active patterns...</div>
+            </div>
+          )}
+          {isLoadingPattern && (
+            <div style={styles.loadingOverlay}>
               <div style={styles.loadingMessage}>Loading pattern...</div>
             </div>
           )}
-          <div style={styles.grid}>
-            {patternCatalog.map(entry => {
-              // Pattern IDs are typically filename without extension
-              const patternId = entry.filename.replace(/\.oxs$/, '');
-              const progressPercent = progressMap.get(patternId) || progressMap.get(entry.filename);
-
-              return (
-                <PatternPreviewCard
-                  key={entry.filename}
-                  entry={entry}
+          {!isLoading && activePatterns.length === 0 && (
+            <div style={styles.emptyState}>
+              <p style={styles.emptyText}>No active patterns found.</p>
+              <p style={styles.emptyHint}>Start stitching a pattern to see it here!</p>
+            </div>
+          )}
+          {!isLoading && activePatterns.length > 0 && (
+            <div style={styles.grid}>
+              {activePatterns.map(item => (
+                <ActivePatternCard
+                  key={item.patternId}
+                  item={item}
                   onSelect={handleSelectPattern}
-                  onLoaded={incrementLoadedCount}
-                  progressPercent={progressPercent}
                 />
-              );
-            })}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
 
         <div style={styles.footer}>
           <div style={styles.footerHint}>
-            Patterns load as you scroll. Click any pattern to start stitching.
+            {activePatterns.length > 0
+              ? `${activePatterns.length} active pattern${activePatterns.length !== 1 ? 's' : ''}`
+              : 'Patterns you start working on will appear here'}
           </div>
-          <button onClick={onClose} style={styles.cancelButton} disabled={isLoading}>
-            Cancel
+          <button onClick={onClose} style={styles.cancelButton} disabled={isLoadingPattern}>
+            Close
           </button>
         </div>
       </div>
@@ -378,14 +340,14 @@ const styles: Record<string, React.CSSProperties> = {
   },
   title: {
     margin: 0,
-    fontSize: '0.9rem',
+    fontSize: '0.8rem',
     fontWeight: '600',
     color: '#333',
   },
   closeButton: {
     background: 'none',
     border: 'none',
-    fontSize: '1rem',
+    fontSize: '0.8rem',
     cursor: 'pointer',
     color: '#666',
     padding: '0',
@@ -414,6 +376,24 @@ const styles: Record<string, React.CSSProperties> = {
     color: '#666',
     fontWeight: '500',
   },
+  emptyState: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: '300px',
+    textAlign: 'center',
+  },
+  emptyText: {
+    fontSize: '0.8rem',
+    color: '#666',
+    margin: '0 0 0.5rem 0',
+  },
+  emptyHint: {
+    fontSize: '0.8rem',
+    color: '#999',
+    margin: 0,
+  },
   grid: {
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))',
@@ -435,6 +415,7 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
+    position: 'relative',
   },
   previewImage: {
     width: '100%',
@@ -451,7 +432,7 @@ const styles: Record<string, React.CSSProperties> = {
     color: 'white',
     padding: '0.375rem 0.625rem',
     borderRadius: '0.375rem',
-    fontSize: '0.775rem',
+    fontSize: '0.875rem',
     fontWeight: '600',
     boxShadow: '0 2px 4px rgba(0, 0, 0, 0.2)',
   },
@@ -467,72 +448,52 @@ const styles: Record<string, React.CSSProperties> = {
     width: '24px',
     height: '24px',
     border: '3px solid #ddd',
-    borderTopColor: '#2D5A27',
+    borderTopColor: '#4A90D9',
     borderRadius: '50%',
     animation: 'spin 1s linear infinite',
   },
-  errorPlaceholder: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    width: '100%',
-    height: '100%',
-    backgroundColor: '#fee',
-  },
-  errorIcon: {
-    fontSize: '1rem',
-    color: '#c00',
-    fontWeight: 'bold',
-  },
-  cardInfo: {
-    padding: '0.75rem',
-    borderTop: '1px solid #e0e0e0',
-  },
-  cardTitle: {
-    fontSize: '0.775rem',
-    fontWeight: '500',
-    color: '#333',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-  },
-  cardDimensions: {
-    fontSize: '0.775rem',
-    color: '#888',
-    marginTop: '0.25rem',
-  },
-  cardMeta: {
-    fontSize: '0.775rem',
-    color: '#888',
-    marginTop: '0.25rem',
-  },
-  sizeLabel: {
-    color: '#aaa',
-  },
-  loadedCounter: {
-    fontSize: '0.775rem',
+  loadingText: {
+    fontSize: '0.75rem',
     color: '#666',
-    backgroundColor: '#f0f0f0',
-    padding: '0.25rem 0.75rem',
-    borderRadius: '1rem',
+    marginTop: '0.5rem',
   },
-  pendingPlaceholder: {
+  errorPlaceholder: {
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
     width: '100%',
     height: '100%',
-    color: '#999',
+    backgroundColor: '#fee',
+    padding: '1rem',
   },
-  pendingText: {
-    fontSize: '0.775rem',
-    color: '#999',
+  errorIcon: {
+    fontSize: '2rem',
+    color: '#c00',
+    fontWeight: 'bold',
   },
-  loadingText: {
-    fontSize: '0.775rem',
-    color: '#666',
+  errorText: {
+    fontSize: '0.7rem',
+    color: '#c00',
     marginTop: '0.5rem',
+    textAlign: 'center',
+  },
+  cardInfo: {
+    padding: '0.75rem',
+    borderTop: '1px solid #e0e0e0',
+  },
+  cardTitle: {
+    fontSize: '0.85rem',
+    fontWeight: '500',
+    color: '#333',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  cardMeta: {
+    fontSize: '0.75rem',
+    color: '#888',
+    marginTop: '0.25rem',
   },
   footer: {
     display: 'flex',
@@ -545,7 +506,7 @@ const styles: Record<string, React.CSSProperties> = {
     flexShrink: 0,
   },
   footerHint: {
-    fontSize: '0.775rem',
+    fontSize: '0.85rem',
     color: '#888',
   },
   cancelButton: {
@@ -554,7 +515,7 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: '0.375rem',
     backgroundColor: 'white',
     cursor: 'pointer',
-    fontSize: '0.775rem',
+    fontSize: '0.95rem',
     fontWeight: '500',
   },
 };

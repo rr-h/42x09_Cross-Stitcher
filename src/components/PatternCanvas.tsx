@@ -579,7 +579,7 @@ export function PatternCanvas() {
         }}
       >
         <div style={{ textAlign: 'center' }}>
-          <p style={{ fontSize: '1.5rem', marginBottom: '1rem' }}>No pattern loaded</p>
+          <p style={{ fontSize: '0.9rem', marginBottom: '1rem' }}>No pattern loaded</p>
           <p>Import an .oxs or .fcjson file to begin</p>
         </div>
       </div>
@@ -644,14 +644,14 @@ export function PatternCanvas() {
           >
             <h2
               style={{
-                fontSize: 'clamp(1.25rem, 5vw, 2rem)',
+                fontSize: 'clamp(0.75rem, 4vw, 1rem)',
                 marginBottom: '0.75rem',
                 color: '#2D5A27',
               }}
             >
               🎉 Congratulations! 🎉
             </h2>
-            <p style={{ fontSize: 'clamp(0.9rem, 3vw, 1.2rem)', color: '#666' }}>
+            <p style={{ fontSize: 'clamp(0.75rem, 3vw, 1rem)', color: '#666' }}>
               You completed the pattern!
             </p>
             <button
@@ -659,7 +659,7 @@ export function PatternCanvas() {
               style={{
                 marginTop: '1.25rem',
                 padding: '0.625rem 1.5rem',
-                fontSize: 'clamp(0.875rem, 3vw, 1rem)',
+                fontSize: 'clamp(0.775rem, 2vw, 0.9rem)',
                 backgroundColor: '#2D5A27',
                 color: 'white',
                 border: 'none',

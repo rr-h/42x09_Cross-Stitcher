@@ -44,7 +44,9 @@ export function FileDropZone({ children }: FileDropZoneProps) {
 
       const filename = file.name.toLowerCase();
       if (!filename.endsWith('.oxs') && !filename.endsWith('.fcjson')) {
-        setError('Unsupported file format. Please use .oxs, .fcjson, or image files (PNG, JPG, etc.).');
+        setError(
+          'Unsupported file format. Please use .oxs, .fcjson, or image files (PNG, JPG, etc.).'
+        );
         return;
       }
 
@@ -83,9 +85,7 @@ export function FileDropZone({ children }: FileDropZoneProps) {
         </div>
       )}
 
-      {imageFile && (
-        <ImageImportModal file={imageFile} onClose={handleCloseImageModal} />
-      )}
+      {imageFile && <ImageImportModal file={imageFile} onClose={handleCloseImageModal} />}
 
       {error && (
         <div style={styles.errorOverlay} onClick={dismissError}>
@@ -126,7 +126,7 @@ const styles: Record<string, React.CSSProperties> = {
     width: '400px',
   },
   dropIcon: {
-    fontSize: 'clamp(2.5rem, 8vw, 4rem)',
+    fontSize: 'clamp(1.5rem, 7vw, 3rem)',
     color: '#2D5A27',
     marginBottom: '1rem',
   },

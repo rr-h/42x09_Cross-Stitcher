@@ -137,7 +137,7 @@ button:active {
 }
 
 .topbar-title {
-  font-size: 0.9rem;
+  font-size: 0.2rem;
   color: #666;
 }
 
@@ -206,7 +206,7 @@ button:active {
 
   .palette-header {
     padding: 0.5rem 0.75rem;
-    font-size: 0.95rem;
+    font-size: 0.3rem;
   }
 
   .palette-list {
@@ -253,7 +253,7 @@ button:active {
   /* Compact buttons on mobile */
   .import-button {
     padding: 0.4rem 0.75rem !important;
-    font-size: 0.8rem !important;
+    font-size: 0.2rem !important;
   }
 
   .tool-group {
@@ -262,23 +262,23 @@ button:active {
 
   .tool-button {
     padding: 0.3rem 0.5rem !important;
-    font-size: 0.75rem !important;
+    font-size: 0.2rem !important;
   }
 
   .zoom-button {
     width: 28px !important;
     height: 28px !important;
-    font-size: 1rem !important;
+    font-size: 0.2rem !important;
   }
 
   .fit-button {
     padding: 0.3rem 0.5rem !important;
-    font-size: 0.75rem !important;
+    font-size: 0.2rem !important;
   }
 
   .zoom-level {
     min-width: 40px !important;
-    font-size: 0.75rem !important;
+    font-size: 0.2rem !important;
   }
 
   .progress-container {
@@ -286,14 +286,14 @@ button:active {
   }
 
   .progress-text {
-    font-size: 0.75rem !important;
+    font-size: 0.2rem !important;
     min-width: 50px !important;
   }
 
   /* Picker button mobile */
   .picker-button {
     padding: 0.5rem 0.75rem !important;
-    font-size: 0.8rem !important;
+    font-size: 0.2rem !important;
     margin: 0.5rem !important;
   }
 }
@@ -308,7 +308,7 @@ button:active {
 
   .tool-button {
     padding: 0.25rem 0.4rem !important;
-    font-size: 0.7rem !important;
+    font-size: 0.2rem !important;
   }
 
   .zoom-button {
@@ -332,12 +332,12 @@ button:active {
   .palette-symbol {
     width: 20px !important;
     height: 20px !important;
-    font-size: 0.85rem !important;
+    font-size: 0.2rem !important;
   }
 
   .palette-count {
     padding: 0.2rem 0.4rem !important;
-    font-size: 0.8rem !important;
+    font-size: 0.2rem !important;
     min-width: 32px !important;
   }
 }
@@ -411,14 +411,14 @@ button:active {
 @media (max-width: 767px) {
   .pick-pattern-button {
     padding: 0.4rem 0.75rem !important;
-    font-size: 0.8rem !important;
+    font-size: 0.3rem !important;
   }
 }
 
 @media (max-width: 479px) {
   .pick-pattern-button {
     padding: 0.3rem 0.5rem !important;
-    font-size: 0.75rem !important;
+    font-size: 0.3rem !important;
   }
 }
 

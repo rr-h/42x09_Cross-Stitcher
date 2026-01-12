@@ -38,6 +38,7 @@ interface GameState {
   viewport: ViewportTransform;
   isComplete: boolean;
   showCelebration: boolean;
+  showActivePatterns: boolean;
 
   // Activity tracking (used by autosave logic)
   lastInteractionAt: number;
@@ -66,6 +67,7 @@ interface GameState {
   removeWrongStitch: (col: number, row: number) => void;
   setViewport: (viewport: ViewportTransform) => void;
   closeCelebration: () => void;
+  setShowActivePatterns: (show: boolean) => void;
   reset: () => void;
 
   /**
@@ -174,6 +176,7 @@ export const useGameStore = create<GameState>((set, get) => {
     viewport: { scale: 1, translateX: 0, translateY: 0 },
     isComplete: false,
     showCelebration: false,
+    showActivePatterns: false,
 
     lastInteractionAt: 0,
     markInteraction: touch,
@@ -461,6 +464,10 @@ export const useGameStore = create<GameState>((set, get) => {
       set({ showCelebration: false });
     },
 
+    setShowActivePatterns: (show: boolean) => {
+      set({ showActivePatterns: show });
+    },
+
     reset: () => {
       set({
         pattern: null,
@@ -470,6 +477,7 @@ export const useGameStore = create<GameState>((set, get) => {
         viewport: { scale: 1, translateX: 0, translateY: 0 },
         isComplete: false,
         showCelebration: false,
+        showActivePatterns: false,
         navigationRequest: null,
         unstitchedIndex: null,
         lastInteractionAt: 0,

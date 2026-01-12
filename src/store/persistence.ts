@@ -201,3 +201,31 @@ export async function deleteLocalSnapshots(patternId: string): Promise<void> {
   }
   await tx.done;
 }
+
+/**
+ * Get all patterns that have saved progress.
+ * Returns an array of objects with patternId and progress percentage.
+ */
+export async function getAllPatternsWithProgress(): Promise<
+  Array<{ patternId: string; progress: UserProgress; progressPercent: number }>
+> {
+  const db = await getDB();
+  const allProgress = (await db.getAll(PROGRESS_STORE)) as PersistedProgress[];
+
+  return allProgress
+    .map(persisted => {
+      const progress = fromPersisted(persisted);
+
+      // Calculate progress percentage
+      const totalTargets = progress.paletteCounts.reduce((sum, pc) => sum + pc.remainingTargets + pc.correctCount, 0);
+      const completedTargets = progress.paletteCounts.reduce((sum, pc) => sum + pc.correctCount, 0);
+      const progressPercent = totalTargets > 0 ? Math.round((completedTargets / totalTargets) * 100) : 0;
+
+      return {
+        patternId: progress.patternId,
+        progress,
+        progressPercent,
+      };
+    })
+    .filter(item => item.progressPercent > 0 && item.progressPercent < 100); // Only include started but not completed patterns
+}

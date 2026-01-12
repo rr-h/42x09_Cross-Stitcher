@@ -6,6 +6,7 @@ import { calculateFitViewport, clampViewport } from '../utils/coordinates';
 import { isImageFile } from '../converters/imageToPattern';
 import { ImageImportModal } from './ImageImportModal';
 import { PatternGalleryModal } from './PatternGalleryModal';
+import { ActivePatternsModal } from './ActivePatternsModal';
 import { AuthButton } from './AuthButton';
 
 export function TopBar() {
@@ -19,10 +20,12 @@ export function TopBar() {
   const viewport = useGameStore(s => s.viewport);
   const toolMode = useGameStore(s => s.toolMode);
   const isComplete = useGameStore(s => s.isComplete);
+  const showActivePatterns = useGameStore(s => s.showActivePatterns);
 
   const loadPattern = useGameStore(s => s.loadPattern);
   const setViewport = useGameStore(s => s.setViewport);
   const setToolMode = useGameStore(s => s.setToolMode);
+  const setShowActivePatterns = useGameStore(s => s.setShowActivePatterns);
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -169,6 +172,14 @@ export function TopBar() {
         >
           Pick Pattern
         </button>
+        <button
+          onClick={() => setShowActivePatterns(true)}
+          className="active-button"
+          style={styles.activeButton}
+          title="View your active patterns in progress"
+        >
+          Active
+        </button>
 
         {pattern && (
           <span className="topbar-title">
@@ -263,6 +274,10 @@ export function TopBar() {
       {showGallery && (
         <PatternGalleryModal onClose={() => setShowGallery(false)} />
       )}
+
+      {showActivePatterns && (
+        <ActivePatternsModal onClose={() => setShowActivePatterns(false)} />
+      )}
     </div>
   );
 }
@@ -292,6 +307,17 @@ const styles: Record<string, React.CSSProperties> = {
   galleryButton: {
     padding: '0.5rem 1rem',
     backgroundColor: '#5A8A55',
+    color: 'white',
+    border: 'none',
+    borderRadius: '0.375rem',
+    cursor: 'pointer',
+    fontWeight: '500',
+    fontSize: '0.9rem',
+    marginLeft: '0.5rem',
+  },
+  activeButton: {
+    padding: '0.5rem 1rem',
+    backgroundColor: '#4A90D9',
     color: 'white',
     border: 'none',
     borderRadius: '0.375rem',

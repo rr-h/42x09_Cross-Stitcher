@@ -34,9 +34,7 @@ export function LoginModal({ onClose }: LoginModalProps) {
         </button>
 
         <h2 style={styles.title}>Sign In</h2>
-        <p style={styles.subtitle}>
-          Sign in to sync your progress across devices
-        </p>
+        <p style={styles.subtitle}>Sign in to sync your progress across devices</p>
 
         {status === 'sent' ? (
           <div style={styles.successBox}>
@@ -63,9 +61,7 @@ export function LoginModal({ onClose }: LoginModalProps) {
               />
             </label>
 
-            {status === 'error' && (
-              <p style={styles.error}>{errorMsg}</p>
-            )}
+            {status === 'error' && <p style={styles.error}>{errorMsg}</p>}
 
             <button
               type="submit"
@@ -109,7 +105,7 @@ const styles: Record<string, React.CSSProperties> = {
     right: '0.75rem',
     background: 'none',
     border: 'none',
-    fontSize: '1.5rem',
+    fontSize: '0.8rem',
     cursor: 'pointer',
     color: '#666',
     lineHeight: 1,
@@ -117,18 +113,18 @@ const styles: Record<string, React.CSSProperties> = {
   },
   title: {
     margin: '0 0 0.5rem 0',
-    fontSize: '1.5rem',
+    fontSize: '0.8rem',
     fontWeight: '600',
     color: '#333',
   },
   subtitle: {
     margin: '0 0 1.5rem 0',
     color: '#666',
-    fontSize: '0.9rem',
+    fontSize: '0.8rem',
   },
   label: {
     display: 'block',
-    fontSize: '0.9rem',
+    fontSize: '0.8rem',
     fontWeight: '500',
     color: '#333',
     marginBottom: '1rem',
@@ -140,7 +136,7 @@ const styles: Record<string, React.CSSProperties> = {
     marginTop: '0.5rem',
     border: '1px solid #ddd',
     borderRadius: '0.375rem',
-    fontSize: '1rem',
+    fontSize: '0.9rem',
     boxSizing: 'border-box',
   },
   button: {
@@ -150,14 +146,14 @@ const styles: Record<string, React.CSSProperties> = {
     color: 'white',
     border: 'none',
     borderRadius: '0.375rem',
-    fontSize: '1rem',
+    fontSize: '0.9rem',
     fontWeight: '500',
     cursor: 'pointer',
     marginTop: '0.5rem',
   },
   error: {
     color: '#dc2626',
-    fontSize: '0.875rem',
+    fontSize: '0.775rem',
     margin: '0.5rem 0',
   },
   successBox: {
@@ -171,7 +167,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   successSubtext: {
     color: '#666',
-    fontSize: '0.9rem',
+    fontSize: '0.775rem',
     margin: '0 0 1.5rem 0',
   },
 };
