@@ -74,6 +74,9 @@ export function PatternCanvas() {
   // Track last handled navigation nonce to avoid re-handling the same request
   const lastNavigationNonceRef = useRef<number>(-1);
 
+  // Track pending single click to distinguish from double-click
+  const singleClickTimerRef = useRef<number | null>(null);
+
   const pattern = useGameStore(s => s.pattern);
   const progress = useGameStore(s => s.progress);
   const viewport = useGameStore(s => s.viewport);
@@ -104,6 +107,15 @@ export function PatternCanvas() {
       return 'grab';
     }
   }, [toolMode, selectedPaletteIndex]);
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => {
+      if (singleClickTimerRef.current !== null) {
+        window.clearTimeout(singleClickTimerRef.current);
+      }
+    };
+  }, []);
 
   // Handle resize
   useEffect(() => {
@@ -187,6 +199,12 @@ export function PatternCanvas() {
   // Handle pointer down
   const handlePointerDown = useCallback(
     (e: React.PointerEvent) => {
+      // Clear any pending single click timer
+      if (singleClickTimerRef.current !== null) {
+        window.clearTimeout(singleClickTimerRef.current);
+        singleClickTimerRef.current = null;
+      }
+
       const rect = canvasRef.current?.getBoundingClientRect();
       if (!rect || !pattern || !progress) return;
 
@@ -220,7 +238,8 @@ export function PatternCanvas() {
         } else if (state === StitchState.None && selectedPaletteIndex !== null) {
           // Unstitched cell with palette selected - start stitch painting
           mode = 'stitch';
-          tryPlaceStitch(cell.col, cell.row);
+          // Don't place stitch immediately - wait to see if this is a double-click
+          // The stitch will be placed on pointer up if no drag occurred
         } else {
           // Stitched cell or no palette selected - pan mode
           mode = 'pan';
@@ -262,7 +281,6 @@ export function PatternCanvas() {
       baseCursorStyle,
       getStitchState,
       getTargetPaletteIndex,
-      tryPlaceStitch,
       floodFillStitch,
       removeWrongStitch,
     ]
@@ -278,6 +296,12 @@ export function PatternCanvas() {
       if (!rect) return;
 
       if (dragState.mode === 'stitch') {
+        // Cancel any pending single click timer since we're now dragging
+        if (singleClickTimerRef.current !== null) {
+          window.clearTimeout(singleClickTimerRef.current);
+          singleClickTimerRef.current = null;
+        }
+
         // Stitch painting mode - place stitches as we drag
         const x = e.clientX - rect.left;
         const y = e.clientY - rect.top;
@@ -336,6 +360,31 @@ export function PatternCanvas() {
   // Handle pointer up
   const handlePointerUp = useCallback(
     (e: React.PointerEvent) => {
+      const dragState = dragStateRef.current;
+      const wasStitchMode = dragState.mode === 'stitch';
+      const wasDragging = dragState.visitedCells.size > 1 ||
+        Math.abs(e.clientX - dragState.startX) > 3 ||
+        Math.abs(e.clientY - dragState.startY) > 3;
+
+      // If we were in stitch mode but didn't drag, schedule a delayed single stitch
+      // This delay allows us to detect double-clicks
+      if (wasStitchMode && !wasDragging && pattern && !isComplete && selectedPaletteIndex !== null) {
+        const rect = canvasRef.current?.getBoundingClientRect();
+        if (rect) {
+          const x = e.clientX - rect.left;
+          const y = e.clientY - rect.top;
+          const cell = screenToGrid(x, y, viewport);
+
+          // Delay the single stitch placement to detect double-click
+          singleClickTimerRef.current = window.setTimeout(() => {
+            if (cell.col >= 0 && cell.col < pattern.width && cell.row >= 0 && cell.row < pattern.height) {
+              tryPlaceStitch(cell.col, cell.row);
+            }
+            singleClickTimerRef.current = null;
+          }, 200); // 200ms delay to detect double-click
+        }
+      }
+
       dragStateRef.current.isDragging = false;
       dragStateRef.current.mode = 'none';
       dragStateRef.current.visitedCells.clear();
@@ -349,17 +398,23 @@ export function PatternCanvas() {
         target.releasePointerCapture(e.pointerId);
       }
     },
-    [baseCursorStyle]
+    [baseCursorStyle, pattern, isComplete, selectedPaletteIndex, viewport, tryPlaceStitch]
   );
 
   // Handle double-click for flood fill (shortcut to avoid switching to fill tool)
   const handleDoubleClick = useCallback(
     (e: React.MouseEvent) => {
+      // Cancel any pending single click timer since this is a double-click
+      if (singleClickTimerRef.current !== null) {
+        window.clearTimeout(singleClickTimerRef.current);
+        singleClickTimerRef.current = null;
+      }
+
       const rect = canvasRef.current?.getBoundingClientRect();
       if (!rect || !pattern || !progress || isComplete) return;
 
-      // Only allow flood fill when in stitch mode (not picker mode)
-      if (toolMode === 'picker') return;
+      // Allow flood fill when in stitch mode (not picker or fill mode)
+      if (toolMode === 'picker' || toolMode === 'fill') return;
 
       // Must have a color selected
       if (selectedPaletteIndex === null) return;
