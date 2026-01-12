@@ -1,6 +1,9 @@
 import { FileDropZone, Palette, PatternCanvas, TopBar } from './components';
+import { useAutosaveSnapshots } from './hooks/useAutosaveSnapshots';
 
 export function App() {
+  useAutosaveSnapshots();
+
   return (
     <FileDropZone>
       <div className="app-container">

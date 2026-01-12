@@ -37,6 +37,9 @@ interface GameState {
   viewport: ViewportTransform;
   isComplete: boolean;
   showCelebration: boolean;
+  // in GameState 
+  lastInteractionAt: number;
+  markInteraction: () => void;
 
   /**
    * Navigation request for PatternCanvas to observe.
