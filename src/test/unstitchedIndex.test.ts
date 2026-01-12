@@ -435,9 +435,9 @@ describe('UnstitchedIndex', () => {
       const pattern = createTestPattern(grid, 2);
       const progress = createTestProgress(pattern);
 
-      const startBuild = performance.now();
+      const startBuild = globalThis.performance.now();
       const index = UnstitchedIndex.build(pattern, progress);
-      const buildTime = performance.now() - startBuild;
+      const buildTime = globalThis.performance.now() - startBuild;
 
       // Each color should have 5000 targets (half of 10000)
       expect(index.getUnstitchedCount(0)).toBe(5000);
@@ -447,20 +447,20 @@ describe('UnstitchedIndex', () => {
       expect(buildTime).toBeLessThan(100);
 
       // Find nearest should be fast
-      const startFind = performance.now();
+      const startFind = globalThis.performance.now();
       const nearest = index.findNearest(0, 50, 50);
-      const findTime = performance.now() - startFind;
+      const findTime = globalThis.performance.now() - startFind;
 
       expect(nearest).not.toBeNull();
       expect(findTime).toBeLessThan(10);
 
       // Multiple markStitched calls should be fast
-      const startMark = performance.now();
+      const startMark = globalThis.performance.now();
       for (let i = 0; i < 100; i++) {
         const cellIndex = i * 2; // Every other cell in row 0
         index.markStitched(cellIndex, cellIndex % 2);
       }
-      const markTime = performance.now() - startMark;
+      const markTime = globalThis.performance.now() - startMark;
 
       expect(markTime).toBeLessThan(10);
     });
