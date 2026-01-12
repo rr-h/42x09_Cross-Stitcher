@@ -4,7 +4,7 @@ image_to_pattern.py
 
 Convert images to OXS cross-stitch patterns (app-compatible).
 
-Performance mechanisms:
+Performance:
 - --jobs N : parallelise across multiple input files
 - --palette-sample-max N : cap pixels used for palette discovery (0 = use all)
 - --quantise-method octree : faster palette quantisation (less accurate than median-cut)
@@ -63,7 +63,6 @@ def _parse_size_limit(value: str) -> tuple[str, float]:
         raise argparse.ArgumentTypeError(f"Invalid pixel value: {value}") from e
     if px <= 0:
         raise argparse.ArgumentTypeError(f"Pixel value must be > 0: {value}")
-        return ("px", float(px))
     return ("px", float(px))
 
 
@@ -119,8 +118,8 @@ def _quantise_opaque_pixels(
         return []
 
     work_rgb = _maybe_sample_pixels(opaque_rgb, palette_sample_max)
-
     n = int(work_rgb.shape[0])
+
     if n <= 250_000:
         packed = (
             (work_rgb[:, 0].astype(np.uint32) << 16)
@@ -150,8 +149,10 @@ def _quantise_opaque_pixels(
     img_arr = flat.reshape((tile_h, tile_w, 3)).astype(np.uint8)
     tmp_img = Image.fromarray(img_arr)
 
+    # PIL quantize supports max 256 colors
+    quantize_colors = min(max_colors, 256)
     q = tmp_img.quantize(
-        colors=max_colors,
+        colors=quantize_colors,
         method=_quantise_method_id(method),
         dither=DITHER_NONE,
     )
@@ -352,11 +353,8 @@ def convert_image_to_pattern(
     alpha_threshold: int,
     palette_sample_max: int,
 ) -> dict:
-    try:
-        img = Image.open(image_path)
-        img = ImageOps.exif_transpose(img)
-    except Exception as e:
-        raise RuntimeError(f"Error opening image {image_path}: {e}") from e
+    img = Image.open(image_path)
+    img = ImageOps.exif_transpose(img)
 
     img_width, img_height = img.size
 
@@ -410,9 +408,6 @@ def write_oxs_file(pattern_doc: dict, output_path: str) -> None:
     if targets.dtype != np.uint16:
         targets = targets.astype(np.uint16, copy=False)
 
-    if targets.size != width * height:
-        raise ValueError("targets size does not match width*height")
-
     with open(output_path, "w", encoding="utf-8", newline="\n") as f:
         f.write('<?xml version="1.0" encoding="UTF-8"?>')
         f.write("<chart>")
@@ -458,8 +453,8 @@ def write_oxs_file(pattern_doc: dict, output_path: str) -> None:
         f.write("</palette>")
 
         f.write("<fullstitches>")
-
         grid = targets.reshape((height, width))
+
         for y in range(height):
             row = grid[y]
             cols = np.flatnonzero(row != NO_STITCH)
@@ -521,40 +516,15 @@ def main() -> int:
     parser.add_argument("--no-dmc", action="store_false", dest="use_dmc_colors")
     parser.add_argument("--resize", action="store_true")
     parser.add_argument("--output-dir", "-o", type=str, default=None)
-    parser.add_argument(
-        "--quantise-method",
-        type=str,
-        default="median-cut",
-        choices=["median-cut", "octree"],
-    )
+    parser.add_argument("--quantise-method", type=str, default="median-cut", choices=["median-cut", "octree"])
     parser.add_argument("--alpha-threshold", type=int, default=128)
     parser.add_argument("--jobs", type=int, default=1)
-    parser.add_argument(
-        "--palette-sample-max",
-        type=int,
-        default=0,
-        help="Max pixels used to discover palette (0 = use all, highest accuracy)",
-    )
+    parser.add_argument("--palette-sample-max", type=int, default=0)
     parser.set_defaults(use_dmc_colors=True, resize=False)
 
     args = parser.parse_args()
 
-    if args.max_colors <= 0:
-        print("--max-colors must be > 0", file=sys.stderr)
-        return 2
-    if not (0 <= args.alpha_threshold <= 255):
-        print("--alpha-threshold must be between 0 and 255", file=sys.stderr)
-        return 2
-    if args.jobs <= 0:
-        print("--jobs must be > 0", file=sys.stderr)
-        return 2
-    if args.palette_sample_max < 0:
-        print("--palette-sample-max must be >= 0", file=sys.stderr)
-        return 2
-
     files = [f for f in args.files if os.path.isfile(f)]
-    for m in [f for f in args.files if not os.path.isfile(f)]:
-        print(f"File not found: {m}", file=sys.stderr)
     if not files:
         return 1
 

@@ -4,13 +4,14 @@ dmc_colors.py
 
 Loads the DMC palette from src/data/dmcColors.ts (SSoT) for dev tooling.
 
-Fixes:
-- Robust parsing of the DMC_COLORS array without relying on fragile one-shot regex.
-- Symbol validation and repair:
-  - Must be a single JS UTF-16 code unit (BMP, not surrogate pair)
-  - No braille
-  - No whitespace/invisible/combining
-  - Must be unique
+Key points:
+- Your dmcColors.ts does NOT store symbols (by design). This loader parses code/name/hex/rgb
+  and assigns symbols deterministically from a code-safe pool.
+- Symbols are validated to be single JS UTF-16 code units (BMP, not surrogate pairs),
+  and we exclude braille and invisible/combining characters.
+
+Environment:
+- DMC_COLORS_TS: optional explicit path to src/data/dmcColors.ts
 """
 
 from __future__ import annotations
@@ -56,10 +57,11 @@ def _is_good_symbol(ch: str) -> bool:
     if 0x2800 <= cp <= 0x28FF:
         return False
 
-    # No whitespace / invisible formatting / combining
+    # No whitespace
     if ch.strip() == "":
         return False
 
+    # No invisible / combining / control / surrogate categories
     cat = unicodedata.category(ch)
     if cat in ("Mn", "Me", "Cf", "Cc", "Cs"):
         return False
@@ -71,71 +73,58 @@ def _is_good_symbol(ch: str) -> bool:
     return True
 
 
-# Known emoji-ish BMP codepoints we want to avoid (even though BMP and length==1).
-# Keep this minimal. We also avoid entire emoji-heavy blocks by not including them.
-_EMOJIISH_BMP: set[int] = {
-    0x231A, 0x231B,
-    0x23E9, 0x23EA, 0x23EB, 0x23EC, 0x23ED, 0x23EE,
-    0x23EF, 0x23F0, 0x23F1, 0x23F2, 0x23F3,
-    0x23F8, 0x23F9, 0x23FA,
-}
-
-
-def _generate_symbol_pool(target_count: int = 1200) -> list[str]:
+def _generate_symbol_pool() -> list[str]:
     """
-    Generate a deterministic pool of code-safe symbols.
+    Build a large pool of BMP-only code-safe symbols.
 
-    Rules:
-    - BMP only (so JS string length is 1)
-    - No braille
-    - No whitespace/invisible/combining
-    - Avoid emoji-heavy blocks (do not include U+2600 and above)
+    We intentionally avoid emoji-heavy blocks. This is for single-cell pattern symbols,
+    not a sticker pack.
     """
     ranges: list[tuple[int, int]] = []
 
-    # Printable ASCII (no space, no backslash)
+    # Printable ASCII (exclude space; we will also exclude backslash later)
     ranges.append((0x21, 0x7F))
 
-    # Latin-1 supplement (exclude soft hyphen later)
+    # Latin-1 supplement
     ranges.append((0x00A1, 0x0100))
 
-    # Latin Extended-A/B, IPA Extensions, Spacing Modifier Letters
-    ranges.append((0x0100, 0x0180))
-    ranges.append((0x0180, 0x0250))
-    ranges.append((0x0250, 0x02B0))
+    # Latin extensions and phonetic
+    ranges.append((0x0100, 0x02B0))
     ranges.append((0x02B0, 0x0300))
 
-    # Greek, Cyrillic
+    # Greek, Cyrillic, Armenian, Hebrew
     ranges.append((0x0370, 0x0400))
     ranges.append((0x0400, 0x0500))
+    ranges.append((0x0530, 0x0590))
+    ranges.append((0x05D0, 0x0600))
 
-    # General Punctuation, Superscripts/Subscripts, Currency, Letterlike, Number forms
+    # Latin Extended Additional
+    ranges.append((0x1E00, 0x1F00))
+
+    # General punctuation, superscripts/subscripts, currency, letterlike, number forms
     ranges.append((0x2000, 0x2070))
     ranges.append((0x2070, 0x20A0))
     ranges.append((0x20A0, 0x20D0))
     ranges.append((0x2100, 0x2150))
     ranges.append((0x2150, 0x2190))
 
-    # Arrows, Math operators, Misc Technical
+    # Arrows, math operators, misc technical
     ranges.append((0x2190, 0x2200))
     ranges.append((0x2200, 0x2300))
     ranges.append((0x2300, 0x2400))
 
-    # Box drawing, block elements, geometric shapes
+    # Box drawing, block elements, geometric shapes (stop before U+2600)
     ranges.append((0x2500, 0x2580))
     ranges.append((0x2580, 0x25A0))
-    ranges.append((0x25A0, 0x2600))  # stop before emoji-heavy U+2600+
+    ranges.append((0x25A0, 0x2600))
 
     out: list[str] = []
     seen: set[str] = set()
 
     for start, end in ranges:
         for cp in range(start, end):
-            if cp == 0x5C:  # backslash
-                continue
-            if cp == 0x00AD:  # soft hyphen
-                continue
-            if cp in _EMOJIISH_BMP:
+            # Remove backslash and soft hyphen
+            if cp == 0x5C or cp == 0x00AD:
                 continue
 
             ch = chr(cp)
@@ -144,20 +133,19 @@ def _generate_symbol_pool(target_count: int = 1200) -> list[str]:
             if not _is_good_symbol(ch):
                 continue
 
-            # Prefer letters, numbers, punctuation, symbols
             cat = unicodedata.category(ch)
             if not (cat.startswith("L") or cat.startswith("N") or cat.startswith("P") or cat.startswith("S")):
                 continue
 
             out.append(ch)
             seen.add(ch)
-            if len(out) >= target_count:
-                return out
 
-    raise RuntimeError(f"Symbol pool too small: {len(out)} < {target_count}")
+    return out
 
 
-_SYMBOL_POOL = _generate_symbol_pool(1200)
+_SYMBOL_POOL = _generate_symbol_pool()
+if len(_SYMBOL_POOL) < 600:
+    raise RuntimeError(f"Symbol pool too small for unique patterns: {len(_SYMBOL_POOL)} < 600")
 
 
 def get_symbol_pool(n: int) -> list[str]:
@@ -169,6 +157,11 @@ def get_symbol_pool(n: int) -> list[str]:
 
 
 def _fixup_symbols_in_place(colors: list[DMCColor]) -> None:
+    if len(_SYMBOL_POOL) < len(colors) + 50:
+        raise RuntimeError(
+            f"Symbol pool too small for DMC palette: pool={len(_SYMBOL_POOL)} colours={len(colors)}"
+        )
+
     used: set[str] = set()
     pool_iter = iter(_SYMBOL_POOL)
 
@@ -210,9 +203,11 @@ def _find_array_slice(text: str, anchor_re: re.Pattern[str]) -> str:
     if not m:
         raise RuntimeError("Could not find DMC_COLORS array anchor in dmcColors.ts")
 
-    i = text.find("[", m.end())
-    if i < 0:
-        raise RuntimeError("Could not find '[' after DMC_COLORS anchor")
+    # Find the actual array start "= [", not type annotation "[]"
+    eq_match = re.search(r"=\s*\[", text[m.end():])
+    if not eq_match:
+        raise RuntimeError("Could not find '= [' after DMC_COLORS anchor")
+    i = m.end() + eq_match.end() - 1  # Position of the '[' character
 
     depth = 0
     in_str: Optional[str] = None
@@ -297,16 +292,16 @@ _re_code = re.compile(r"\bcode\s*:\s*['\"]([^'\"]+)['\"]")
 _re_name = re.compile(r"\bname\s*:\s*['\"]([^'\"]+)['\"]")
 _re_hex = re.compile(r"\bhex\s*:\s*['\"](#?[0-9A-Fa-f]{6})['\"]")
 _re_rgb = re.compile(r"\brgb\s*:\s*\[\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\]")
-_re_sym = re.compile(r"\bsymbol\s*:\s*['\"]([^'\"]+)['\"]")
 
 
 def _parse_object(obj_text: str) -> Optional[DMCColor]:
+    # NOTE: dmcColors.ts does NOT include symbols, so symbol is assigned later.
     code_m = _re_code.search(obj_text)
     name_m = _re_name.search(obj_text)
     hex_m = _re_hex.search(obj_text)
     rgb_m = _re_rgb.search(obj_text)
-    sym_m = _re_sym.search(obj_text)
-    if not (code_m and name_m and hex_m and rgb_m and sym_m):
+
+    if not (code_m and name_m and hex_m and rgb_m):
         return None
 
     code = code_m.group(1).strip()
@@ -315,9 +310,8 @@ def _parse_object(obj_text: str) -> Optional[DMCColor]:
     r = int(rgb_m.group(1))
     g = int(rgb_m.group(2))
     b = int(rgb_m.group(3))
-    sym = sym_m.group(1)
 
-    return {"code": code, "name": name, "hex": hex_val, "rgb": (r, g, b), "symbol": sym}
+    return {"code": code, "name": name, "hex": hex_val, "rgb": (r, g, b), "symbol": ""}
 
 
 def _parse_dmc_colors_ts(ts_path: Path) -> list[DMCColor]:
