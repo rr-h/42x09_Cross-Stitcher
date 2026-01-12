@@ -18,11 +18,11 @@ function bytesToBase64(bytes: Uint8Array): string {
   for (let i = 0; i < bytes.length; i += chunkSize) {
     binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
   }
-  return btoa(binary);
+  return globalThis.btoa(binary);
 }
 
 function base64ToBytes(b64: string): Uint8Array {
-  const binary = atob(b64);
+  const binary = globalThis.atob(b64);
   const out = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
   return out;
@@ -44,7 +44,7 @@ async function gzipCompress(input: Uint8Array): Promise<Uint8Array> {
   if (!CS) return input;
 
   const cs = new CS('gzip');
-  const stream = new Blob([input]).stream().pipeThrough(cs);
+  const stream = new Blob([input as any]).stream().pipeThrough(cs);
   const ab = await new Response(stream).arrayBuffer();
   return new Uint8Array(ab);
 }
@@ -54,7 +54,7 @@ async function gzipDecompress(input: Uint8Array): Promise<Uint8Array> {
   if (!DS) return input;
 
   const ds = new DS('gzip');
-  const stream = new Blob([input]).stream().pipeThrough(ds);
+  const stream = new Blob([input as any]).stream().pipeThrough(ds);
   const ab = await new Response(stream).arrayBuffer();
   return new Uint8Array(ab);
 }

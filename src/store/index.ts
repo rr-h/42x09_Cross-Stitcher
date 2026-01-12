@@ -10,6 +10,7 @@ import type {
 import { NO_STITCH, StitchState } from '../types';
 import { UnstitchedIndex } from '../utils/UnstitchedIndex';
 import { loadProgress, saveProgress } from './persistence';
+import { loadLatestRemoteSnapshot } from '../sync/remoteSnapshots';
 
 /**
  * Navigation request object. PatternCanvas subscribes to changes and
@@ -37,7 +38,8 @@ interface GameState {
   viewport: ViewportTransform;
   isComplete: boolean;
   showCelebration: boolean;
-  // in GameState 
+
+  // Activity tracking (used by autosave logic)
   lastInteractionAt: number;
   markInteraction: () => void;
 
@@ -101,7 +103,7 @@ function createInitialProgress(pattern: PatternDoc): UserProgress {
   const size = pattern.width * pattern.height;
   const stitchedState = new Uint8Array(size);
   const placedColors = new Uint16Array(size);
-  placedColors.fill(NO_STITCH); // Initialize all to NO_STITCH
+  placedColors.fill(NO_STITCH);
 
   const paletteCounts: PaletteCounts[] = pattern.palette.map(p => ({
     remainingTargets: p.totalTargets,
@@ -123,200 +125,138 @@ function checkCompletion(_pattern: PatternDoc, paletteCounts: PaletteCounts[]): 
   return paletteCounts.every(pc => pc.remainingTargets === 0);
 }
 
+function countAnyStitches(progress: UserProgress): number {
+  let count = 0;
+  const s = progress.stitchedState;
+  for (let i = 0; i < s.length; i++) {
+    if (s[i] !== StitchState.None) count++;
+  }
+  return count;
+}
+
 /** Counter for generating unique navigation request nonces */
 let navigationNonce = 0;
 
-export const useGameStore = create<GameState>((set, get) => ({
-  pattern: null,
-  progress: null,
-  selectedPaletteIndex: null,
-  toolMode: 'stitch',
-  viewport: { scale: 1, translateX: 0, translateY: 0 },
-  isComplete: false,
-  showCelebration: false,
-  navigationRequest: null,
-  unstitchedIndex: null,
+export const useGameStore = create<GameState>((set, get) => {
+  const touch = () => set({ lastInteractionAt: Date.now() });
 
-  loadPattern: async (pattern: PatternDoc) => {
-    // Try to load existing progress
-    const existingProgress = await loadProgress(pattern.id);
+  const chooseBestProgress = (
+    pattern: PatternDoc,
+    local: UserProgress | null,
+    remote: UserProgress | null
+  ) => {
+    const expectedSize = pattern.width * pattern.height;
 
-    if (
-      existingProgress &&
-      existingProgress.stitchedState.length === pattern.width * pattern.height
-    ) {
-      // Build the unstitched index from existing progress
-      const unstitchedIndex = UnstitchedIndex.build(pattern, existingProgress);
+    const localOk =
+      !!local && local.patternId === pattern.id && local.stitchedState.length === expectedSize;
 
-      set({
-        pattern,
-        progress: existingProgress,
-        selectedPaletteIndex: existingProgress.lastSelectedPaletteIndex,
-        viewport: existingProgress.viewport,
-        isComplete: checkCompletion(pattern, existingProgress.paletteCounts),
-        showCelebration: false,
-        toolMode: 'stitch',
-        unstitchedIndex,
-        navigationRequest: null,
-      });
-    } else {
-      const newProgress = createInitialProgress(pattern);
-      // Build the unstitched index from fresh progress
-      const unstitchedIndex = UnstitchedIndex.build(pattern, newProgress);
+    const remoteOk =
+      !!remote && remote.patternId === pattern.id && remote.stitchedState.length === expectedSize;
 
-      set({
-        pattern,
-        progress: newProgress,
-        selectedPaletteIndex: null,
-        viewport: { scale: 1, translateX: 0, translateY: 0 },
-        isComplete: false,
-        showCelebration: false,
-        toolMode: 'stitch',
-        unstitchedIndex,
-        navigationRequest: null,
-      });
+    if (localOk && remoteOk) {
+      // Heuristic: pick the one with more stitches. If tied, prefer remote.
+      const localCount = countAnyStitches(local!);
+      const remoteCount = countAnyStitches(remote!);
+      return remoteCount >= localCount ? remote! : local!;
     }
-  },
 
-  selectPalette: (index: number) => {
-    const { progress } = get();
-    if (progress) {
-      const updatedProgress = {
-        ...progress,
-        lastSelectedPaletteIndex: index,
-      };
-      set({
-        selectedPaletteIndex: index,
-        toolMode: 'stitch',
-        progress: updatedProgress,
-      });
-      saveProgress(updatedProgress);
-    } else {
-      set({ selectedPaletteIndex: index, toolMode: 'stitch' });
-    }
-  },
+    if (remoteOk) return remote!;
+    if (localOk) return local!;
 
-  setToolMode: (mode: ToolMode) => {
-    set({ toolMode: mode });
-  },
+    return null;
+  };
 
-  placeStitch: (col: number, row: number) => {
-    const { pattern, progress, selectedPaletteIndex, unstitchedIndex } = get();
-    if (!pattern || !progress || selectedPaletteIndex === null) return;
+  return {
+    pattern: null,
+    progress: null,
+    selectedPaletteIndex: null,
+    toolMode: 'stitch',
+    viewport: { scale: 1, translateX: 0, translateY: 0 },
+    isComplete: false,
+    showCelebration: false,
 
-    const cellIndex = row * pattern.width + col;
-    if (cellIndex < 0 || cellIndex >= progress.stitchedState.length) return;
+    lastInteractionAt: 0,
+    markInteraction: touch,
 
-    // Don't overwrite existing stitches
-    if (progress.stitchedState[cellIndex] !== StitchState.None) return;
+    navigationRequest: null,
+    unstitchedIndex: null,
 
-    const targetIndex = pattern.targets[cellIndex];
-    if (targetIndex === NO_STITCH) return; // Can't stitch empty cells
+    loadPattern: async (pattern: PatternDoc) => {
+      const localProgress = await loadProgress(pattern.id);
 
-    const isCorrect = targetIndex === selectedPaletteIndex;
-    const newState = isCorrect ? StitchState.Correct : StitchState.Wrong;
-
-    const newStitchedState = new Uint8Array(progress.stitchedState);
-    newStitchedState[cellIndex] = newState;
-
-    // Track the actual color placed
-    const newPlacedColors = new Uint16Array(progress.placedColors);
-    newPlacedColors[cellIndex] = selectedPaletteIndex;
-
-    const newPaletteCounts = [...progress.paletteCounts];
-
-    if (isCorrect) {
-      // Correct stitch: decrement remaining targets for that palette
-      newPaletteCounts[targetIndex] = {
-        ...newPaletteCounts[targetIndex],
-        remainingTargets: newPaletteCounts[targetIndex].remainingTargets - 1,
-        correctCount: newPaletteCounts[targetIndex].correctCount + 1,
-      };
-
-      // Update the unstitched index - mark this cell as stitched
-      if (unstitchedIndex) {
-        unstitchedIndex.markStitched(cellIndex, targetIndex);
+      let remoteProgress: UserProgress | null = null;
+      try {
+        remoteProgress = await loadLatestRemoteSnapshot(pattern.id);
+      } catch (err) {
+        // Do not block pattern load if Supabase is unavailable
+        console.warn('Remote load failed:', err);
       }
-    } else {
-      // Wrong stitch: increment wrong count for the selected palette
-      // Note: Do NOT update unstitchedIndex for wrong stitches - the target remains unstitched
-      newPaletteCounts[selectedPaletteIndex] = {
-        ...newPaletteCounts[selectedPaletteIndex],
-        wrongCount: newPaletteCounts[selectedPaletteIndex].wrongCount + 1,
-      };
-    }
 
-    const updatedProgress: UserProgress = {
-      ...progress,
-      stitchedState: newStitchedState,
-      placedColors: newPlacedColors,
-      paletteCounts: newPaletteCounts,
-    };
+      const chosen = chooseBestProgress(pattern, localProgress, remoteProgress);
+      const progress = chosen ?? createInitialProgress(pattern);
+      const unstitchedIndex = UnstitchedIndex.build(pattern, progress);
 
-    const isNowComplete = checkCompletion(pattern, newPaletteCounts);
+      set({
+        pattern,
+        progress,
+        selectedPaletteIndex: progress.lastSelectedPaletteIndex,
+        viewport: progress.viewport,
+        isComplete: checkCompletion(pattern, progress.paletteCounts),
+        showCelebration: false,
+        toolMode: 'stitch',
+        unstitchedIndex,
+        navigationRequest: null,
+      });
+    },
 
-    set({
-      progress: updatedProgress,
-      isComplete: isNowComplete,
-      showCelebration: isNowComplete && !get().isComplete,
-    });
+    selectPalette: (index: number) => {
+      touch();
+      const { progress } = get();
+      if (progress) {
+        const updatedProgress = {
+          ...progress,
+          lastSelectedPaletteIndex: index,
+        };
+        set({
+          selectedPaletteIndex: index,
+          toolMode: 'stitch',
+          progress: updatedProgress,
+        });
+        saveProgress(updatedProgress);
+      } else {
+        set({ selectedPaletteIndex: index, toolMode: 'stitch' });
+      }
+    },
 
-    saveProgress(updatedProgress);
-  },
+    setToolMode: (mode: ToolMode) => {
+      touch();
+      set({ toolMode: mode });
+    },
 
-  floodFillStitch: (col: number, row: number) => {
-    const { pattern, progress, selectedPaletteIndex, unstitchedIndex } = get();
-    if (!pattern || !progress || selectedPaletteIndex === null) return;
+    placeStitch: (col: number, row: number) => {
+      touch();
+      const { pattern, progress, selectedPaletteIndex, unstitchedIndex } = get();
+      if (!pattern || !progress || selectedPaletteIndex === null) return;
 
-    const startIndex = row * pattern.width + col;
-    if (startIndex < 0 || startIndex >= progress.stitchedState.length) return;
+      const cellIndex = row * pattern.width + col;
+      if (cellIndex < 0 || cellIndex >= progress.stitchedState.length) return;
 
-    // Check if starting cell is valid for flood fill
-    const startTargetIndex = pattern.targets[startIndex];
-    if (startTargetIndex !== selectedPaletteIndex) return; // Must match selected color
-    if (progress.stitchedState[startIndex] !== StitchState.None) return; // Must be unstitched
-
-    // BFS to find all connected cells with same target color that are unstitched
-    const cellsToFill: number[] = [];
-    const visited = new Set<number>();
-    const queue: Array<{ col: number; row: number }> = [{ col, row }];
-
-    while (queue.length > 0) {
-      const current = queue.shift()!;
-      const cellIndex = current.row * pattern.width + current.col;
-
-      if (visited.has(cellIndex)) continue;
-      if (current.col < 0 || current.col >= pattern.width) continue;
-      if (current.row < 0 || current.row >= pattern.height) continue;
+      // Do not overwrite existing stitches
+      if (progress.stitchedState[cellIndex] !== StitchState.None) return;
 
       const targetIndex = pattern.targets[cellIndex];
-      if (targetIndex !== selectedPaletteIndex) continue; // Different color
-      if (progress.stitchedState[cellIndex] !== StitchState.None) continue; // Already stitched
+      if (targetIndex === NO_STITCH) return;
 
-      visited.add(cellIndex);
-      cellsToFill.push(cellIndex);
-
-      // Add orthogonal neighbors (not diagonal)
-      queue.push({ col: current.col - 1, row: current.row }); // left
-      queue.push({ col: current.col + 1, row: current.row }); // right
-      queue.push({ col: current.col, row: current.row - 1 }); // up
-      queue.push({ col: current.col, row: current.row + 1 }); // down
-    }
-
-    if (cellsToFill.length === 0) return;
-
-    // Place all stitches at once
-    const newStitchedState = new Uint8Array(progress.stitchedState);
-    const newPlacedColors = new Uint16Array(progress.placedColors);
-    const newPaletteCounts = [...progress.paletteCounts];
-
-    for (const cellIndex of cellsToFill) {
-      const targetIndex = pattern.targets[cellIndex];
       const isCorrect = targetIndex === selectedPaletteIndex;
       const newState = isCorrect ? StitchState.Correct : StitchState.Wrong;
 
+      const newStitchedState = new Uint8Array(progress.stitchedState);
       newStitchedState[cellIndex] = newState;
+
+      const newPlacedColors = new Uint16Array(progress.placedColors);
       newPlacedColors[cellIndex] = selectedPaletteIndex;
+
+      const newPaletteCounts = [...progress.paletteCounts];
 
       if (isCorrect) {
         newPaletteCounts[targetIndex] = {
@@ -324,200 +264,285 @@ export const useGameStore = create<GameState>((set, get) => ({
           remainingTargets: newPaletteCounts[targetIndex].remainingTargets - 1,
           correctCount: newPaletteCounts[targetIndex].correctCount + 1,
         };
+
+        if (unstitchedIndex) {
+          unstitchedIndex.markStitched(cellIndex, targetIndex);
+        }
       } else {
         newPaletteCounts[selectedPaletteIndex] = {
           ...newPaletteCounts[selectedPaletteIndex],
           wrongCount: newPaletteCounts[selectedPaletteIndex].wrongCount + 1,
         };
       }
-    }
 
-    // Batch update the unstitched index for all correct stitches
-    if (unstitchedIndex) {
-      const correctCells = cellsToFill.filter(idx => pattern.targets[idx] === selectedPaletteIndex);
-      unstitchedIndex.markStitchedBatch(correctCells, selectedPaletteIndex);
-    }
-
-    const updatedProgress: UserProgress = {
-      ...progress,
-      stitchedState: newStitchedState,
-      placedColors: newPlacedColors,
-      paletteCounts: newPaletteCounts,
-    };
-
-    const isNowComplete = checkCompletion(pattern, newPaletteCounts);
-
-    set({
-      progress: updatedProgress,
-      isComplete: isNowComplete,
-      showCelebration: isNowComplete && !get().isComplete,
-    });
-
-    saveProgress(updatedProgress);
-  },
-
-  removeWrongStitch: (col: number, row: number) => {
-    const { pattern, progress } = get();
-    if (!pattern || !progress) return;
-
-    const cellIndex = row * pattern.width + col;
-    if (cellIndex < 0 || cellIndex >= progress.stitchedState.length) return;
-
-    // Only remove wrong stitches
-    if (progress.stitchedState[cellIndex] !== StitchState.Wrong) return;
-
-    const newStitchedState = new Uint8Array(progress.stitchedState);
-    newStitchedState[cellIndex] = StitchState.None;
-
-    // Get which palette was actually placed and clear it
-    const placedPaletteIndex = progress.placedColors[cellIndex];
-    const newPlacedColors = new Uint16Array(progress.placedColors);
-    newPlacedColors[cellIndex] = NO_STITCH;
-
-    const newPaletteCounts = [...progress.paletteCounts];
-
-    // Decrement wrong count for the palette that was actually used
-    if (placedPaletteIndex !== NO_STITCH && placedPaletteIndex < newPaletteCounts.length) {
-      newPaletteCounts[placedPaletteIndex] = {
-        ...newPaletteCounts[placedPaletteIndex],
-        wrongCount: Math.max(0, newPaletteCounts[placedPaletteIndex].wrongCount - 1),
+      const updatedProgress: UserProgress = {
+        ...progress,
+        stitchedState: newStitchedState,
+        placedColors: newPlacedColors,
+        paletteCounts: newPaletteCounts,
       };
-    }
 
-    // Note: Do NOT update unstitchedIndex when removing wrong stitches.
-    // Wrong stitches never affected the index (targets remained "unstitched" for their target color).
+      const wasComplete = get().isComplete;
+      const isNowComplete = checkCompletion(pattern, newPaletteCounts);
 
-    const updatedProgress: UserProgress = {
-      ...progress,
-      stitchedState: newStitchedState,
-      placedColors: newPlacedColors,
-      paletteCounts: newPaletteCounts,
-    };
+      set({
+        progress: updatedProgress,
+        isComplete: isNowComplete,
+        showCelebration: isNowComplete && !wasComplete,
+      });
 
-    set({ progress: updatedProgress });
-    saveProgress(updatedProgress);
-  },
-
-  setViewport: (viewport: ViewportTransform) => {
-    const { progress } = get();
-    set({ viewport });
-
-    if (progress) {
-      const updatedProgress = { ...progress, viewport };
-      set({ progress: updatedProgress });
-      // Debounce saving viewport changes
       saveProgress(updatedProgress);
-    }
-  },
+    },
 
-  navigateToCell: (cellIndex: number, opts?: { animate?: boolean }) => {
-    const { pattern, progress } = get();
-    if (!pattern || !progress) return;
+    floodFillStitch: (col: number, row: number) => {
+      touch();
+      const { pattern, progress, selectedPaletteIndex, unstitchedIndex } = get();
+      if (!pattern || !progress || selectedPaletteIndex === null) return;
 
-    // Validate cell index
-    const totalCells = pattern.width * pattern.height;
-    if (cellIndex < 0 || cellIndex >= totalCells) return;
+      const startIndex = row * pattern.width + col;
+      if (startIndex < 0 || startIndex >= progress.stitchedState.length) return;
 
-    // Increment nonce to ensure this request is treated as new
-    navigationNonce++;
+      const startTargetIndex = pattern.targets[startIndex];
+      if (startTargetIndex !== selectedPaletteIndex) return;
+      if (progress.stitchedState[startIndex] !== StitchState.None) return;
 
-    set({
-      navigationRequest: {
-        cellIndex,
-        animate: opts?.animate ?? true,
-        nonce: navigationNonce,
-      },
-    });
-  },
+      const cellsToFill: number[] = [];
+      const visited = new Set<number>();
+      const queue: Array<{ col: number; row: number }> = [{ col, row }];
 
-  clearNavigationRequest: () => {
-    set({ navigationRequest: null });
-  },
+      while (queue.length > 0) {
+        const current = queue.shift()!;
+        if (current.col < 0 || current.col >= pattern.width) continue;
+        if (current.row < 0 || current.row >= pattern.height) continue;
 
-  closeCelebration: () => {
-    set({ showCelebration: false });
-  },
+        const cellIndex = current.row * pattern.width + current.col;
+        if (visited.has(cellIndex)) continue;
 
-  reset: () => {
-    set({
-      pattern: null,
-      progress: null,
-      selectedPaletteIndex: null,
-      toolMode: 'stitch',
-      viewport: { scale: 1, translateX: 0, translateY: 0 },
-      isComplete: false,
-      showCelebration: false,
-      navigationRequest: null,
-      unstitchedIndex: null,
-    });
-  },
+        const targetIndex = pattern.targets[cellIndex];
+        if (targetIndex !== selectedPaletteIndex) continue;
+        if (progress.stitchedState[cellIndex] !== StitchState.None) continue;
 
-  getTotalWrongCount: () => {
-    const { progress } = get();
-    if (!progress) return 0;
-    return progress.paletteCounts.reduce((sum, pc) => sum + pc.wrongCount, 0);
-  },
+        visited.add(cellIndex);
+        cellsToFill.push(cellIndex);
 
-  getRemainingForPalette: (index: number) => {
-    const { progress } = get();
-    if (!progress || index < 0 || index >= progress.paletteCounts.length) return 0;
-    return progress.paletteCounts[index].remainingTargets;
-  },
+        queue.push({ col: current.col - 1, row: current.row });
+        queue.push({ col: current.col + 1, row: current.row });
+        queue.push({ col: current.col, row: current.row - 1 });
+        queue.push({ col: current.col, row: current.row + 1 });
+      }
 
-  getStitchState: (col: number, row: number) => {
-    const { pattern, progress } = get();
-    if (!pattern || !progress) return StitchState.None;
-    const cellIndex = row * pattern.width + col;
-    if (cellIndex < 0 || cellIndex >= progress.stitchedState.length) return StitchState.None;
-    return progress.stitchedState[cellIndex];
-  },
+      if (cellsToFill.length === 0) return;
 
-  getTargetPaletteIndex: (col: number, row: number) => {
-    const { pattern } = get();
-    if (!pattern) return NO_STITCH;
-    const cellIndex = row * pattern.width + col;
-    if (cellIndex < 0 || cellIndex >= pattern.targets.length) return NO_STITCH;
-    return pattern.targets[cellIndex];
-  },
+      const newStitchedState = new Uint8Array(progress.stitchedState);
+      const newPlacedColors = new Uint16Array(progress.placedColors);
+      const newPaletteCounts = [...progress.paletteCounts];
 
-  findNearestUnstitched: (
-    paletteIndex: number,
-    viewportCenterCol: number,
-    viewportCenterRow: number
-  ) => {
-    const { unstitchedIndex } = get();
+      for (const cellIndex of cellsToFill) {
+        const targetIndex = pattern.targets[cellIndex];
+        const isCorrect = targetIndex === selectedPaletteIndex;
+        const newState = isCorrect ? StitchState.Correct : StitchState.Wrong;
 
-    // Use the indexed approach for fast lookups
-    if (unstitchedIndex) {
-      return unstitchedIndex.findNearest(paletteIndex, viewportCenterCol, viewportCenterRow);
-    }
+        newStitchedState[cellIndex] = newState;
+        newPlacedColors[cellIndex] = selectedPaletteIndex;
 
-    // Fallback: should not happen if pattern is loaded correctly
-    // But keep the old O(n) scan as a safety net
-    const { pattern, progress } = get();
-    if (!pattern || !progress) return null;
+        if (isCorrect) {
+          newPaletteCounts[targetIndex] = {
+            ...newPaletteCounts[targetIndex],
+            remainingTargets: newPaletteCounts[targetIndex].remainingTargets - 1,
+            correctCount: newPaletteCounts[targetIndex].correctCount + 1,
+          };
+        } else {
+          newPaletteCounts[selectedPaletteIndex] = {
+            ...newPaletteCounts[selectedPaletteIndex],
+            wrongCount: newPaletteCounts[selectedPaletteIndex].wrongCount + 1,
+          };
+        }
+      }
 
-    let nearestCell: GridCell | null = null;
-    let minDistSq = Infinity;
+      if (unstitchedIndex) {
+        const correctCells = cellsToFill.filter(
+          idx => pattern.targets[idx] === selectedPaletteIndex
+        );
+        unstitchedIndex.markStitchedBatch(correctCells, selectedPaletteIndex);
+      }
 
-    for (let row = 0; row < pattern.height; row++) {
-      for (let col = 0; col < pattern.width; col++) {
-        const cellIndex = row * pattern.width + col;
-        const targetIdx = pattern.targets[cellIndex];
+      const updatedProgress: UserProgress = {
+        ...progress,
+        stitchedState: newStitchedState,
+        placedColors: newPlacedColors,
+        paletteCounts: newPaletteCounts,
+      };
 
-        if (targetIdx === paletteIndex && progress.stitchedState[cellIndex] === StitchState.None) {
-          const dx = col - viewportCenterCol;
-          const dy = row - viewportCenterRow;
-          const distSq = dx * dx + dy * dy;
+      const wasComplete = get().isComplete;
+      const isNowComplete = checkCompletion(pattern, newPaletteCounts);
 
-          if (distSq < minDistSq) {
-            minDistSq = distSq;
-            nearestCell = { col, row };
+      set({
+        progress: updatedProgress,
+        isComplete: isNowComplete,
+        showCelebration: isNowComplete && !wasComplete,
+      });
+
+      saveProgress(updatedProgress);
+    },
+
+    removeWrongStitch: (col: number, row: number) => {
+      touch();
+      const { pattern, progress } = get();
+      if (!pattern || !progress) return;
+
+      const cellIndex = row * pattern.width + col;
+      if (cellIndex < 0 || cellIndex >= progress.stitchedState.length) return;
+
+      if (progress.stitchedState[cellIndex] !== StitchState.Wrong) return;
+
+      const newStitchedState = new Uint8Array(progress.stitchedState);
+      newStitchedState[cellIndex] = StitchState.None;
+
+      const placedPaletteIndex = progress.placedColors[cellIndex];
+      const newPlacedColors = new Uint16Array(progress.placedColors);
+      newPlacedColors[cellIndex] = NO_STITCH;
+
+      const newPaletteCounts = [...progress.paletteCounts];
+
+      if (placedPaletteIndex !== NO_STITCH && placedPaletteIndex < newPaletteCounts.length) {
+        newPaletteCounts[placedPaletteIndex] = {
+          ...newPaletteCounts[placedPaletteIndex],
+          wrongCount: Math.max(0, newPaletteCounts[placedPaletteIndex].wrongCount - 1),
+        };
+      }
+
+      const updatedProgress: UserProgress = {
+        ...progress,
+        stitchedState: newStitchedState,
+        placedColors: newPlacedColors,
+        paletteCounts: newPaletteCounts,
+      };
+
+      set({ progress: updatedProgress });
+      saveProgress(updatedProgress);
+    },
+
+    setViewport: (viewport: ViewportTransform) => {
+      touch();
+      const { progress } = get();
+      set({ viewport });
+
+      if (progress) {
+        const updatedProgress = { ...progress, viewport };
+        set({ progress: updatedProgress });
+        saveProgress(updatedProgress);
+      }
+    },
+
+    navigateToCell: (cellIndex: number, opts?: { animate?: boolean }) => {
+      touch();
+      const { pattern, progress } = get();
+      if (!pattern || !progress) return;
+
+      const totalCells = pattern.width * pattern.height;
+      if (cellIndex < 0 || cellIndex >= totalCells) return;
+
+      navigationNonce++;
+
+      set({
+        navigationRequest: {
+          cellIndex,
+          animate: opts?.animate ?? true,
+          nonce: navigationNonce,
+        },
+      });
+    },
+
+    clearNavigationRequest: () => {
+      set({ navigationRequest: null });
+    },
+
+    closeCelebration: () => {
+      set({ showCelebration: false });
+    },
+
+    reset: () => {
+      set({
+        pattern: null,
+        progress: null,
+        selectedPaletteIndex: null,
+        toolMode: 'stitch',
+        viewport: { scale: 1, translateX: 0, translateY: 0 },
+        isComplete: false,
+        showCelebration: false,
+        navigationRequest: null,
+        unstitchedIndex: null,
+        lastInteractionAt: 0,
+      });
+    },
+
+    getTotalWrongCount: () => {
+      const { progress } = get();
+      if (!progress) return 0;
+      return progress.paletteCounts.reduce((sum, pc) => sum + pc.wrongCount, 0);
+    },
+
+    getRemainingForPalette: (index: number) => {
+      const { progress } = get();
+      if (!progress || index < 0 || index >= progress.paletteCounts.length) return 0;
+      return progress.paletteCounts[index].remainingTargets;
+    },
+
+    getStitchState: (col: number, row: number) => {
+      const { pattern, progress } = get();
+      if (!pattern || !progress) return StitchState.None;
+      const cellIndex = row * pattern.width + col;
+      if (cellIndex < 0 || cellIndex >= progress.stitchedState.length) return StitchState.None;
+      return progress.stitchedState[cellIndex];
+    },
+
+    getTargetPaletteIndex: (col: number, row: number) => {
+      const { pattern } = get();
+      if (!pattern) return NO_STITCH;
+      const cellIndex = row * pattern.width + col;
+      if (cellIndex < 0 || cellIndex >= pattern.targets.length) return NO_STITCH;
+      return pattern.targets[cellIndex];
+    },
+
+    findNearestUnstitched: (
+      paletteIndex: number,
+      viewportCenterCol: number,
+      viewportCenterRow: number
+    ) => {
+      const { unstitchedIndex } = get();
+
+      if (unstitchedIndex) {
+        return unstitchedIndex.findNearest(paletteIndex, viewportCenterCol, viewportCenterRow);
+      }
+
+      const { pattern, progress } = get();
+      if (!pattern || !progress) return null;
+
+      let nearestCell: GridCell | null = null;
+      let minDistSq = Infinity;
+
+      for (let row = 0; row < pattern.height; row++) {
+        for (let col = 0; col < pattern.width; col++) {
+          const cellIndex = row * pattern.width + col;
+          const targetIdx = pattern.targets[cellIndex];
+
+          if (
+            targetIdx === paletteIndex &&
+            progress.stitchedState[cellIndex] === StitchState.None
+          ) {
+            const dx = col - viewportCenterCol;
+            const dy = row - viewportCenterRow;
+            const distSq = dx * dx + dy * dy;
+
+            if (distSq < minDistSq) {
+              minDistSq = distSq;
+              nearestCell = { col, row };
+            }
           }
         }
       }
-    }
 
-    return nearestCell;
-  },
-}));
+      return nearestCell;
+    },
+  };
+});

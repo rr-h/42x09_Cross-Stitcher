@@ -1,6 +1,10 @@
-import { supabase } from './supabaseClient';
 import type { UserProgress } from '../types';
-import { decodeProgressSnapshot, encodeProgressSnapshot, snapshotToProgress } from './snapshotCodec';
+import {
+  decodeProgressSnapshot,
+  encodeProgressSnapshot,
+  snapshotToProgress,
+} from './snapshotCodec';
+import { supabase } from './supabaseClient';
 
 const BUCKET = 'pattern-saves';
 const MAX_SLOTS = 9;
@@ -82,7 +86,10 @@ function pickSlotToWrite(existing: RemoteSlot[]): number {
   return oldest.slot;
 }
 
-export async function saveRemoteRollingSnapshot(progress: UserProgress, savedAt: number): Promise<void> {
+export async function saveRemoteRollingSnapshot(
+  progress: UserProgress,
+  savedAt: number
+): Promise<void> {
   const userId = await getUserId();
   if (!userId) return; // not signed in, nothing to do
 
@@ -91,7 +98,7 @@ export async function saveRemoteRollingSnapshot(progress: UserProgress, savedAt:
   const path = slotPath(userId, progress.patternId, slot);
 
   const bytes = await encodeProgressSnapshot(progress, savedAt);
-  const blob = new Blob([bytes], { type: 'application/gzip' });
+  const blob = new Blob([bytes as any], { type: 'application/gzip' });
 
   const { error } = await supabase.storage.from(BUCKET).upload(path, blob, {
     upsert: true,
