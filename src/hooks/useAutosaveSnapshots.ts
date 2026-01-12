@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { useGameStore } from '../store';
+import { useGameStore } from '../store/storeFunctions';
 import { saveRemoteRollingSnapshot } from '../sync/remoteSnapshots';
 
 const SAVE_EVERY_MS = 5 * 60 * 1000;
@@ -15,8 +15,12 @@ export function useAutosaveSnapshots(): void {
   const lastInteractionRef = useRef(lastInteractionAt);
   const lastSavedAtRef = useRef(0);
 
-  useEffect(() => { progressRef.current = progress; }, [progress]);
-  useEffect(() => { lastInteractionRef.current = lastInteractionAt; }, [lastInteractionAt]);
+  useEffect(() => {
+    progressRef.current = progress;
+  }, [progress]);
+  useEffect(() => {
+    lastInteractionRef.current = lastInteractionAt;
+  }, [lastInteractionAt]);
 
   useEffect(() => {
     if (!patternId) return;
@@ -48,7 +52,9 @@ export function useAutosaveSnapshots(): void {
       }
     };
 
-    timer = window.setInterval(() => { void tick(); }, TICK_MS);
+    timer = window.setInterval(() => {
+      void tick();
+    }, TICK_MS);
 
     // save when tab is hidden, if user was active recently
     const onVis = () => {

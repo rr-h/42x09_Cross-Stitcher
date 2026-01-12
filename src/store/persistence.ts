@@ -1,17 +1,18 @@
 import { openDB, type IDBPDatabase } from 'idb';
-import type { PaletteCounts, UserProgress, ViewportTransform } from '../types';
+import type { PaletteCounts, UserProgress, ViewportTransform, PatternDoc } from '../types';
 import { NO_STITCH } from '../types';
 
 const DB_NAME = 'cross-stitcher-db';
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 
 // Stores
 const PROGRESS_STORE = 'progress';
 const SNAPSHOT_STORE = 'snapshots';
+const PATTERN_STORE = 'patterns';
 
 type MaybeArrayBuffer = ArrayBuffer | number[];
 
-interface PersistedProgress {
+export interface PersistedProgress {
   patternId: string;
   stitchedState: MaybeArrayBuffer;
   placedColors?: MaybeArrayBuffer;
@@ -20,14 +21,23 @@ interface PersistedProgress {
   viewport: ViewportTransform;
 }
 
-interface PersistedSnapshot extends PersistedProgress {
+export interface PersistedSnapshot extends PersistedProgress {
   slot: number; // 0..8
   savedAt: number; // epoch ms
 }
 
+export interface PersistedPattern {
+  id: string;
+  width: number;
+  height: number;
+  palette: PatternDoc['palette'];
+  targets: MaybeArrayBuffer;
+  meta: PatternDoc['meta'];
+}
+
 let dbPromise: Promise<IDBPDatabase> | null = null;
 
-function getDB(): Promise<IDBPDatabase> {
+export function getDB(): Promise<IDBPDatabase> {
   if (!dbPromise) {
     dbPromise = openDB(DB_NAME, DB_VERSION, {
       upgrade(db) {
@@ -40,31 +50,35 @@ function getDB(): Promise<IDBPDatabase> {
           store.createIndex('byPatternId', 'patternId');
           store.createIndex('byPatternIdSavedAt', ['patternId', 'savedAt']);
         }
+
+        if (!db.objectStoreNames.contains(PATTERN_STORE)) {
+          db.createObjectStore(PATTERN_STORE, { keyPath: 'id' });
+        }
       },
     });
   }
   return dbPromise;
 }
 
-function u8ToPersisted(u8: Uint8Array): ArrayBuffer {
+export function u8ToPersisted(u8: Uint8Array): ArrayBuffer {
   return u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength) as ArrayBuffer;
 }
 
-function u16ToPersisted(u16: Uint16Array): ArrayBuffer {
+export function u16ToPersisted(u16: Uint16Array): ArrayBuffer {
   return u16.buffer.slice(u16.byteOffset, u16.byteOffset + u16.byteLength) as ArrayBuffer;
 }
 
-function persistedToU8(data: MaybeArrayBuffer): Uint8Array {
+export function persistedToU8(data: MaybeArrayBuffer): Uint8Array {
   if (data instanceof ArrayBuffer) return new Uint8Array(data);
   return new Uint8Array(data);
 }
 
-function persistedToU16(data: MaybeArrayBuffer): Uint16Array {
+export function persistedToU16(data: MaybeArrayBuffer): Uint16Array {
   if (data instanceof ArrayBuffer) return new Uint16Array(data);
   return new Uint16Array(data);
 }
 
-function toPersisted(progress: UserProgress): PersistedProgress {
+export function toPersisted(progress: UserProgress): PersistedProgress {
   return {
     patternId: progress.patternId,
     stitchedState: u8ToPersisted(progress.stitchedState),
@@ -75,7 +89,7 @@ function toPersisted(progress: UserProgress): PersistedProgress {
   };
 }
 
-function fromPersisted(persisted: PersistedProgress): UserProgress {
+export function fromPersisted(persisted: PersistedProgress): UserProgress {
   const stitchedState = persistedToU8(persisted.stitchedState);
 
   let placedColors: Uint16Array;
@@ -111,6 +125,48 @@ export async function loadProgress(patternId: string): Promise<UserProgress | nu
 export async function deleteProgress(patternId: string): Promise<void> {
   const db = await getDB();
   await db.delete(PROGRESS_STORE, patternId);
+}
+
+/**
+ * Save a pattern to IndexedDB so it can be reloaded later
+ */
+export async function savePattern(pattern: PatternDoc): Promise<void> {
+  const db = await getDB();
+  const persisted: PersistedPattern = {
+    id: pattern.id,
+    width: pattern.width,
+    height: pattern.height,
+    palette: pattern.palette,
+    targets: u16ToPersisted(pattern.targets),
+    meta: pattern.meta,
+  };
+  await db.put(PATTERN_STORE, persisted);
+}
+
+/**
+ * Load a pattern from IndexedDB
+ */
+export async function loadPattern(patternId: string): Promise<PatternDoc | null> {
+  const db = await getDB();
+  const persisted = (await db.get(PATTERN_STORE, patternId)) as PersistedPattern | undefined;
+  if (!persisted) return null;
+
+  return {
+    id: persisted.id,
+    width: persisted.width,
+    height: persisted.height,
+    palette: persisted.palette,
+    targets: persistedToU16(persisted.targets),
+    meta: persisted.meta,
+  };
+}
+
+/**
+ * Delete a pattern from IndexedDB
+ */
+export async function deletePattern(patternId: string): Promise<void> {
+  const db = await getDB();
+  await db.delete(PATTERN_STORE, patternId);
 }
 
 /**
@@ -217,9 +273,13 @@ export async function getAllPatternsWithProgress(): Promise<
       const progress = fromPersisted(persisted);
 
       // Calculate progress percentage
-      const totalTargets = progress.paletteCounts.reduce((sum, pc) => sum + pc.remainingTargets + pc.correctCount, 0);
+      const totalTargets = progress.paletteCounts.reduce(
+        (sum, pc) => sum + pc.remainingTargets + pc.correctCount,
+        0
+      );
       const completedTargets = progress.paletteCounts.reduce((sum, pc) => sum + pc.correctCount, 0);
-      const progressPercent = totalTargets > 0 ? Math.round((completedTargets / totalTargets) * 100) : 0;
+      const progressPercent =
+        totalTargets > 0 ? Math.round((completedTargets / totalTargets) * 100) : 0;
 
       return {
         patternId: progress.patternId,

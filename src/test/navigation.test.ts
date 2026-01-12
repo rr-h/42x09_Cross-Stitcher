@@ -9,7 +9,7 @@ vi.mock('../store/persistence', () => ({
 }));
 
 // Import store after mocking
-import { useGameStore } from '../store';
+import { useGameStore } from '../store/storeFunctions';
 
 /**
  * Creates a minimal test pattern for store testing.

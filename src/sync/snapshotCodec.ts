@@ -11,7 +11,7 @@ export interface ProgressSnapshotV1 {
   viewport: ViewportTransform;
 }
 
-function bytesToBase64(bytes: Uint8Array): string {
+export function bytesToBase64(bytes: Uint8Array): string {
   // chunked to avoid call stack / argument limits
   let binary = '';
   const chunkSize = 0x8000;
@@ -21,14 +21,14 @@ function bytesToBase64(bytes: Uint8Array): string {
   return globalThis.btoa(binary);
 }
 
-function base64ToBytes(b64: string): Uint8Array {
+export function base64ToBytes(b64: string): Uint8Array {
   const binary = globalThis.atob(b64);
   const out = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
   return out;
 }
 
-function u16ToBase64(u16: Uint16Array): string {
+export function u16ToBase64(u16: Uint16Array): string {
   return bytesToBase64(new Uint8Array(u16.buffer));
 }
 
@@ -39,7 +39,7 @@ function base64ToU16(b64: string): Uint16Array {
   return new Uint16Array(buf);
 }
 
-async function gzipCompress(input: Uint8Array): Promise<Uint8Array> {
+export async function gzipCompress(input: Uint8Array): Promise<Uint8Array> {
   const CS = (globalThis as any).CompressionStream as (new (format: string) => any) | undefined;
   if (!CS) return input;
 
@@ -49,7 +49,7 @@ async function gzipCompress(input: Uint8Array): Promise<Uint8Array> {
   return new Uint8Array(ab);
 }
 
-async function gzipDecompress(input: Uint8Array): Promise<Uint8Array> {
+export async function gzipDecompress(input: Uint8Array): Promise<Uint8Array> {
   const DS = (globalThis as any).DecompressionStream as (new (format: string) => any) | undefined;
   if (!DS) return input;
 
@@ -59,7 +59,10 @@ async function gzipDecompress(input: Uint8Array): Promise<Uint8Array> {
   return new Uint8Array(ab);
 }
 
-export async function encodeProgressSnapshot(progress: UserProgress, savedAt: number): Promise<Uint8Array> {
+export async function encodeProgressSnapshot(
+  progress: UserProgress,
+  savedAt: number
+): Promise<Uint8Array> {
   const snap: ProgressSnapshotV1 = {
     v: 1,
     savedAt,

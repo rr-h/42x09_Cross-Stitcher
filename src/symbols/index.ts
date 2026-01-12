@@ -1,11 +1,10 @@
-// Central symbol module exports
 export {
-  SYMBOL_POOL,
-  MAX_PALETTE_SIZE,
-  isSingleCodeUnitSymbol,
-  isValidPoolSymbol,
-  validateSymbolPool,
   assignSymbolsForPalette,
   DEFAULT_SYMBOL_OPTIONS,
-  type SymbolAssignOptions,
-} from './SymbolPool';
+  isSingleCodeUnitSymbol,
+  isValidPoolSymbol,
+  MAX_PALETTE_SIZE,
+  SYMBOL_POOL,
+  validateSymbolPool,
+} from './SymbolPool.ts';
+export type { SymbolAssignOptions } from './SymbolPool.ts';

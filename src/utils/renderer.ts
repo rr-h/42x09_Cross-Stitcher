@@ -2,16 +2,17 @@
 
 import type { PatternDoc, ViewportTransform } from '../types';
 import { NO_STITCH, StitchState } from '../types';
+import { hexToRgb, rgbToString } from './colors';
 import { CELL_SIZE, getVisibleGridBounds, worldToScreen } from './coordinates';
 import { getCellRandoms } from './random';
 
 // Colors matching the sample image - dark fabric with visible weave holes
-const FABRIC_COLOR = '#F5F0E8';
-const FABRIC_HOLE_COLOR = '#F5F0E8';
-const SYMBOL_COLOR = '#888888';
-const SELECTED_COLOR_HIGHLIGHT = 'rgba(100, 149, 237, 0.3)'; // Light blue highlight for selected color cells
+export const FABRIC_COLOR = '#F5F0E8';
+export const FABRIC_HOLE_COLOR = '#F5F0E8';
+export const SYMBOL_COLOR = '#888888';
+export const SELECTED_COLOR_HIGHLIGHT = 'rgba(100, 149, 237, 0.3)'; // Light blue highlight for selected color cells
 
-interface RenderContext {
+export interface RenderContext {
   ctx: CanvasRenderingContext2D;
   pattern: PatternDoc;
   stitchedState: Uint8Array;
@@ -22,21 +23,7 @@ interface RenderContext {
   canvasHeight: number;
 }
 
-function hexToRgb(hex: string): { r: number; g: number; b: number } {
-  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-  if (!result) return { r: 128, g: 128, b: 128 };
-  return {
-    r: parseInt(result[1], 16),
-    g: parseInt(result[2], 16),
-    b: parseInt(result[3], 16),
-  };
-}
-
-function rgbToString(r: number, g: number, b: number, a: number = 1): string {
-  return `rgba(${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)}, ${a})`;
-}
-
-function drawFabricBackground(rc: RenderContext): void {
+export function drawFabricBackground(rc: RenderContext): void {
   const { ctx, canvasWidth, canvasHeight, viewport, pattern } = rc;
 
   // Fill with dark fabric color
@@ -72,7 +59,7 @@ function drawFabricBackground(rc: RenderContext): void {
   }
 }
 
-function drawSymbol(
+export function drawSymbol(
   ctx: CanvasRenderingContext2D,
   symbol: string,
   screenX: number,
@@ -88,7 +75,7 @@ function drawSymbol(
 }
 
 // Draw a single thread strand with realistic embroidery thread appearance
-function drawThreadStrand(
+export function drawThreadStrand(
   ctx: CanvasRenderingContext2D,
   x0: number,
   y0: number,
@@ -186,10 +173,10 @@ function drawThreadStrand(
 
   for (let i = 0; i < numStriations; i++) {
     const t = i / numStriations;
-    const alpha = 0.03 + (Math.sin(t * Math.PI) * 0.02); // Subtle variation
+    const alpha = 0.03 + Math.sin(t * Math.PI) * 0.02; // Subtle variation
 
     // Draw thin striation along thread direction
-    const offset = (i % 3 - 1) * thickness * 0.15; // Slight offset for variation
+    const offset = ((i % 3) - 1) * thickness * 0.15; // Slight offset for variation
     const sx0 = x0 + dx * t + nx * offset;
     const sy0 = y0 + dy * t + ny * offset;
     const sx1 = x0 + dx * (t + 0.15) + nx * offset;
@@ -231,7 +218,7 @@ function drawThreadStrand(
 }
 
 // Draw a realistic cross stitch with two crossing threads
-function drawRealisticStitch(
+export function drawRealisticStitch(
   ctx: CanvasRenderingContext2D,
   screenX: number,
   screenY: number,
@@ -293,12 +280,7 @@ function drawRealisticStitch(
   shadowGradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
 
   ctx.fillStyle = shadowGradient;
-  ctx.fillRect(
-    centerX - shadowSize,
-    centerY - shadowSize,
-    shadowSize * 2,
-    shadowSize * 2
-  );
+  ctx.fillRect(centerX - shadowSize, centerY - shadowSize, shadowSize * 2, shadowSize * 2);
 
   // Draw second strand (top-left to bottom-right) - OVER
   // This creates the proper X crossing pattern
@@ -315,7 +297,7 @@ function drawRealisticStitch(
   );
 }
 
-function drawWrongIndicator(
+export function drawWrongIndicator(
   ctx: CanvasRenderingContext2D,
   screenX: number,
   screenY: number,

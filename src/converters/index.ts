@@ -1,7 +1,7 @@
 export {
   convertImageToPattern,
-  isImageFile,
-  getImageDimensions,
-  type ImageConversionOptions,
   DEFAULT_OPTIONS,
-} from './imageToPattern';
+  getImageDimensions,
+  isImageFile,
+} from './imageToPattern.ts';
+export type { ImageConversionOptions } from './imageToPattern.ts';

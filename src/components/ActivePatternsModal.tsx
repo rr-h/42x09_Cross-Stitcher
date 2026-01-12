@@ -1,10 +1,16 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { useGameStore } from '../store';
-import { getAllPatternsWithProgress, deleteProgress, deleteLocalSnapshots } from '../store/persistence';
+import { loadPatternFile, patternCatalog } from '../data/patternCatalog';
+import { parseOXS } from '../parsers/oxs';
+import {
+  deleteLocalSnapshots,
+  deletePattern,
+  deleteProgress,
+  getAllPatternsWithProgress,
+  loadPattern as loadStoredPattern,
+} from '../store/persistence';
+import { useGameStore } from '../store/storeFunctions';
 import type { PatternDoc, UserProgress } from '../types';
 import { NO_STITCH } from '../types';
-import { patternCatalog, loadPatternFile } from '../data/patternCatalog';
-import { parseOXS } from '../parsers/oxs';
 
 interface ActivePatternsModalProps {
   onClose: () => void;
@@ -68,9 +74,19 @@ function generateProgressPreview(
   return canvas.toDataURL('image/png');
 }
 
-// Try to load pattern from catalog
-async function tryLoadCatalogPattern(patternId: string): Promise<PatternDoc | null> {
-  // Check if this pattern is in the catalog
+// Try to load pattern from IndexedDB or catalog
+async function tryLoadPattern(patternId: string): Promise<PatternDoc | null> {
+  // First, try loading from IndexedDB (for uploaded patterns)
+  try {
+    const storedPattern = await loadStoredPattern(patternId);
+    if (storedPattern) {
+      return storedPattern;
+    }
+  } catch (err) {
+    console.error('Failed to load stored pattern:', err);
+  }
+
+  // If not in storage, try to load from catalog
   const catalogEntry = patternCatalog.find(entry => {
     // Pattern IDs are typically based on filename without extension
     const baseFilename = entry.filename.replace(/\.oxs$/, '');
@@ -112,7 +128,7 @@ function ActivePatternCard({
     let mounted = true;
 
     // Try to load the pattern
-    tryLoadCatalogPattern(state.patternId)
+    tryLoadPattern(state.patternId)
       .then(pattern => {
         if (!mounted) return;
 
@@ -155,7 +171,7 @@ function ActivePatternCard({
 
   const handleDelete = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (confirm(`Delete progress for "${state.pattern?.meta.title || state.patternId}"?`)) {
+    if (window.confirm(`Delete progress for "${state.pattern?.meta.title || state.patternId}"?`)) {
       onDelete(state.patternId);
     }
   };
@@ -269,7 +285,7 @@ export function ActivePatternsModal({ onClose }: ActivePatternsModalProps) {
         onClose();
       } catch (error) {
         console.error('Failed to load pattern:', error);
-        alert(
+        window.alert(
           `Failed to load pattern: ${error instanceof Error ? error.message : 'Unknown error'}`
         );
       } finally {
@@ -282,15 +298,18 @@ export function ActivePatternsModal({ onClose }: ActivePatternsModalProps) {
   const handleDeleteProgress = useCallback(
     async (patternId: string) => {
       try {
-        // Delete both the progress and snapshots
+        // Delete the progress, snapshots, and pattern
         await deleteProgress(patternId);
         await deleteLocalSnapshots(patternId);
+        await deletePattern(patternId);
 
         // Reload the active patterns list
         loadActivePatterns();
       } catch (error) {
         console.error('Failed to delete progress:', error);
-        alert(`Failed to delete progress: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        window.alert(
+          `Failed to delete progress: ${error instanceof Error ? error.message : 'Unknown error'}`
+        );
       }
     },
     [loadActivePatterns]
@@ -397,7 +416,7 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: 'pointer',
     color: '#666',
     padding: '0',
-    lineHeight: '1',
+    lineHeight: '0.5',
   },
   content: {
     flex: 1,
@@ -493,12 +512,12 @@ const styles: Record<string, React.CSSProperties> = {
     color: 'white',
     border: 'none',
     cursor: 'pointer',
-    fontSize: '1.5rem',
+    fontSize: '1rem',
     fontWeight: 'bold',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    lineHeight: '1',
+    lineHeight: '0.5',
     boxShadow: '0 2px 6px rgba(0, 0, 0, 0.3)',
     transition: 'all 0.2s',
     zIndex: 2,

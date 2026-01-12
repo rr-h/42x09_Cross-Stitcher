@@ -5,7 +5,7 @@ import {
   getImageDimensions,
   type ImageConversionOptions,
 } from '../converters/imageToPattern';
-import { useGameStore } from '../store';
+import { useGameStore } from '../store/storeFunctions';
 
 declare const URL: typeof globalThis.URL;
 

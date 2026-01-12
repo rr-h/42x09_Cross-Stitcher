@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useGameStore } from '../store';
+import { useGameStore } from '../store/storeFunctions';
 import type { GridCell, ViewportTransform } from '../types';
 import { StitchState } from '../types';
 import {
@@ -362,13 +362,20 @@ export function PatternCanvas() {
     (e: React.PointerEvent) => {
       const dragState = dragStateRef.current;
       const wasStitchMode = dragState.mode === 'stitch';
-      const wasDragging = dragState.visitedCells.size > 1 ||
+      const wasDragging =
+        dragState.visitedCells.size > 1 ||
         Math.abs(e.clientX - dragState.startX) > 3 ||
         Math.abs(e.clientY - dragState.startY) > 3;
 
       // If we were in stitch mode but didn't drag, schedule a delayed single stitch
       // This delay allows us to detect double-clicks
-      if (wasStitchMode && !wasDragging && pattern && !isComplete && selectedPaletteIndex !== null) {
+      if (
+        wasStitchMode &&
+        !wasDragging &&
+        pattern &&
+        !isComplete &&
+        selectedPaletteIndex !== null
+      ) {
         const rect = canvasRef.current?.getBoundingClientRect();
         if (rect) {
           const x = e.clientX - rect.left;
@@ -377,7 +384,12 @@ export function PatternCanvas() {
 
           // Delay the single stitch placement to detect double-click
           singleClickTimerRef.current = window.setTimeout(() => {
-            if (cell.col >= 0 && cell.col < pattern.width && cell.row >= 0 && cell.row < pattern.height) {
+            if (
+              cell.col >= 0 &&
+              cell.col < pattern.width &&
+              cell.row >= 0 &&
+              cell.row < pattern.height
+            ) {
               tryPlaceStitch(cell.col, cell.row);
             }
             singleClickTimerRef.current = null;
@@ -435,7 +447,11 @@ export function PatternCanvas() {
       }
 
       // Priority 2: Flood fill if cell is unstitched and matches selected color
-      if (selectedPaletteIndex !== null && state === StitchState.None && targetIdx === selectedPaletteIndex) {
+      if (
+        selectedPaletteIndex !== null &&
+        state === StitchState.None &&
+        targetIdx === selectedPaletteIndex
+      ) {
         floodFillStitch(cell.col, cell.row);
       }
     },

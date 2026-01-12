@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { patternCatalog, loadPatternFile, type PatternCatalogEntry } from '../data/patternCatalog';
+import { loadPatternFile, patternCatalog, type PatternCatalogEntry } from '../data/patternCatalog';
 import { parseOXS } from '../parsers/oxs';
-import { useGameStore } from '../store';
 import { getAllPatternsWithProgress } from '../store/persistence';
+import { useGameStore } from '../store/storeFunctions';
 import type { PatternDoc } from '../types';
 import { NO_STITCH } from '../types';
 

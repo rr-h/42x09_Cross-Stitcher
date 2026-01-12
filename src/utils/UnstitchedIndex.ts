@@ -32,15 +32,15 @@ import type { PatternDoc, UserProgress, GridCell } from '../types';
 import { StitchState, NO_STITCH } from '../types';
 
 /** Tile size for spatial bucketing. 32x32 is a good balance of memory vs lookup speed. */
-const TILE_SIZE = 32;
+export const TILE_SIZE = 32;
 
 /** Sentinel value for cells that are not targets for any color. */
-const NOT_A_TARGET = 0xFFFFFFFF;
+export const NOT_A_TARGET = 0xffffffff;
 
 /**
  * Per-color index tracking unstitched cells.
  */
-interface ColorIndex {
+export interface ColorIndex {
   /** Array of cell indices that target this color (sorted for binary search if needed). */
   targetCells: Uint32Array;
   /** Pre-computed columns for each target cell (parallel array to targetCells). */
@@ -198,8 +198,12 @@ export class UnstitchedIndex {
 
       if (ring === 0) {
         // Just the center tile
-        if (centerTileCol >= 0 && centerTileCol <= maxTileCol &&
-            centerTileRow >= 0 && centerTileRow <= maxTileRow) {
+        if (
+          centerTileCol >= 0 &&
+          centerTileCol <= maxTileCol &&
+          centerTileRow >= 0 &&
+          centerTileRow <= maxTileRow
+        ) {
           tilesToCheck.push(centerTileRow * this.tilesPerRow + centerTileCol);
         }
       } else {
@@ -211,8 +215,7 @@ export class UnstitchedIndex {
 
             const tileCol = centerTileCol + dx;
             const tileRow = centerTileRow + dy;
-            if (tileCol >= 0 && tileCol <= maxTileCol &&
-                tileRow >= 0 && tileRow <= maxTileRow) {
+            if (tileCol >= 0 && tileCol <= maxTileCol && tileRow >= 0 && tileRow <= maxTileRow) {
               tilesToCheck.push(tileRow * this.tilesPerRow + tileCol);
             }
           }

@@ -6,20 +6,20 @@ import {
 } from './snapshotCodec';
 import { supabase } from './supabaseClient';
 
-const BUCKET = 'pattern-saves';
-const MAX_SLOTS = 9;
+export const BUCKET = 'pattern-saves';
+export const MAX_SLOTS = 9;
 
-type RemoteSlot = {
+export type RemoteSlot = {
   slot: number;
   path: string;
   updatedAtMs: number;
 };
 
-function slotPath(userId: string, patternId: string, slot: number): string {
+export function slotPath(userId: string, patternId: string, slot: number): string {
   return `${userId}/${patternId}/slot-${slot}.json.gz`;
 }
 
-function parseSlot(name: string): number | null {
+export function parseSlot(name: string): number | null {
   // expects slot-N.json.gz
   const m = /^slot-(\d+)\.json\.gz$/i.exec(name);
   if (!m) return null;
@@ -75,7 +75,7 @@ export async function listRemoteSlots(patternId: string): Promise<RemoteSlot[]> 
   return slots;
 }
 
-function pickSlotToWrite(existing: RemoteSlot[]): number {
+export function pickSlotToWrite(existing: RemoteSlot[]): number {
   if (existing.length < MAX_SLOTS) {
     const used = new Set(existing.map(s => s.slot));
     for (let i = 0; i < MAX_SLOTS; i++) if (!used.has(i)) return i;

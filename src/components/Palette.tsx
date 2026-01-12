@@ -1,5 +1,5 @@
 import type React from 'react';
-import { useGameStore } from '../store';
+import { useGameStore } from '../store/storeFunctions';
 import { getViewportCenterInGrid } from '../utils/coordinates';
 
 export function Palette() {

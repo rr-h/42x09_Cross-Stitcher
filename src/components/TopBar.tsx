@@ -1,13 +1,13 @@
 import { useRef, useState } from 'react';
+import { isImageFile } from '../converters/imageToPattern';
 import { parsePatternFile } from '../parsers';
-import { useGameStore } from '../store';
+import { useGameStore } from '../store/storeFunctions';
 import type { ViewportTransform } from '../types';
 import { calculateFitViewport, clampViewport } from '../utils/coordinates';
-import { isImageFile } from '../converters/imageToPattern';
-import { ImageImportModal } from './ImageImportModal';
-import { PatternGalleryModal } from './PatternGalleryModal';
 import { ActivePatternsModal } from './ActivePatternsModal';
 import { AuthButton } from './AuthButton';
+import { ImageImportModal } from './ImageImportModal';
+import { PatternGalleryModal } from './PatternGalleryModal';
 
 export function TopBar() {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -267,17 +267,11 @@ export function TopBar() {
         <AuthButton />
       </div>
 
-      {imageFile && (
-        <ImageImportModal file={imageFile} onClose={handleCloseImageModal} />
-      )}
+      {imageFile && <ImageImportModal file={imageFile} onClose={handleCloseImageModal} />}
 
-      {showGallery && (
-        <PatternGalleryModal onClose={() => setShowGallery(false)} />
-      )}
+      {showGallery && <PatternGalleryModal onClose={() => setShowGallery(false)} />}
 
-      {showActivePatterns && (
-        <ActivePatternsModal onClose={() => setShowActivePatterns(false)} />
-      )}
+      {showActivePatterns && <ActivePatternsModal onClose={() => setShowActivePatterns(false)} />}
     </div>
   );
 }

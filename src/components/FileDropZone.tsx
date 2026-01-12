@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
-import { parsePatternFile } from '../parsers';
-import { useGameStore } from '../store';
 import { isImageFile } from '../converters/imageToPattern';
+import { parsePatternFile } from '../parsers';
+import { useGameStore } from '../store/storeFunctions';
 import { ImageImportModal } from './ImageImportModal';
 
 interface FileDropZoneProps {

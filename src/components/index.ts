@@ -1,7 +1,9 @@
-export { PatternCanvas } from './PatternCanvas';
-export { Palette } from './Palette';
-export { TopBar } from './TopBar';
-export { FileDropZone } from './FileDropZone';
-export { ImageImportModal } from './ImageImportModal';
-export { PatternGalleryModal } from './PatternGalleryModal';
-export { ActivePatternsModal } from './ActivePatternsModal';
+export { ActivePatternsModal } from './ActivePatternsModal.ts';
+export { AuthButton } from './AuthButton.ts';
+export { FileDropZone } from './FileDropZone.ts';
+export { ImageImportModal } from './ImageImportModal.ts';
+export { LoginModal } from './LoginModal.ts';
+export { Palette } from './Palette.ts';
+export { PatternCanvas } from './PatternCanvas.ts';
+export { PatternGalleryModal } from './PatternGalleryModal.ts';
+export { TopBar } from './TopBar.ts';
