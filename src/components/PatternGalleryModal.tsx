@@ -16,6 +16,29 @@ interface PreviewState {
   previewDataUrl: string | null;
 }
 
+// Loading queue to limit concurrent pattern loads
+const loadingQueue: Array<() => Promise<void>> = [];
+let activeLoads = 0;
+const MAX_CONCURRENT_LOADS = 2;
+
+function processQueue() {
+  while (activeLoads < MAX_CONCURRENT_LOADS && loadingQueue.length > 0) {
+    const next = loadingQueue.shift();
+    if (next) {
+      activeLoads++;
+      next().finally(() => {
+        activeLoads--;
+        processQueue();
+      });
+    }
+  }
+}
+
+function queueLoad(loadFn: () => Promise<void>) {
+  loadingQueue.push(loadFn);
+  processQueue();
+}
+
 // Generate a preview image of a fully stitched pattern
 function generatePreviewImage(pattern: PatternDoc, maxSize: number = 150): string {
   const canvas = document.createElement('canvas');
@@ -60,67 +83,132 @@ function generatePreviewImage(pattern: PatternDoc, maxSize: number = 150): strin
   return canvas.toDataURL('image/png');
 }
 
+// Cache for loaded patterns to avoid re-parsing
+const patternCache = new Map<string, { pattern: PatternDoc; previewDataUrl: string }>();
+
 function PatternPreviewCard({
   entry,
   onSelect,
+  onLoaded,
 }: {
   entry: PatternCatalogEntry;
   onSelect: (pattern: PatternDoc) => void;
+  onLoaded?: () => void;
 }) {
-  const [state, setState] = useState<PreviewState>({
-    pattern: null,
-    loading: false,
-    error: null,
-    previewDataUrl: null,
+  const [state, setState] = useState<PreviewState>(() => {
+    // Check cache first
+    const cached = patternCache.get(entry.filename);
+    if (cached) {
+      return {
+        pattern: cached.pattern,
+        loading: false,
+        error: null,
+        previewDataUrl: cached.previewDataUrl,
+      };
+    }
+    return {
+      pattern: null,
+      loading: false,
+      error: null,
+      previewDataUrl: null,
+    };
   });
-  const loadedRef = useRef(false);
 
-  useEffect(() => {
-    if (loadedRef.current) return;
-    loadedRef.current = true;
+  const cardRef = useRef<HTMLDivElement>(null);
+  const loadStartedRef = useRef(false);
+
+  const startLoading = useCallback(() => {
+    if (loadStartedRef.current || state.pattern) return;
+    loadStartedRef.current = true;
 
     setState(s => ({ ...s, loading: true }));
 
-    loadPatternFile(entry.filename)
-      .then(content => parseOXS(content))
-      .then(pattern => {
+    queueLoad(async () => {
+      try {
+        const content = await loadPatternFile(entry.filename);
+        const pattern = await parseOXS(content);
         const previewDataUrl = generatePreviewImage(pattern, 150);
+
+        // Cache the result
+        patternCache.set(entry.filename, { pattern, previewDataUrl });
+
         setState({
           pattern,
           loading: false,
           error: null,
           previewDataUrl,
         });
-      })
-      .catch(err => {
+        onLoaded?.();
+      } catch (err) {
         setState({
           pattern: null,
           loading: false,
           error: err instanceof Error ? err.message : 'Failed to load',
           previewDataUrl: null,
         });
-      });
-  }, [entry.filename]);
+      }
+    });
+  }, [entry.filename, state.pattern, onLoaded]);
+
+  // Lazy load using IntersectionObserver
+  useEffect(() => {
+    if (loadStartedRef.current || state.pattern) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          observer.disconnect();
+          startLoading();
+        }
+      },
+      { rootMargin: '100px' } // Start loading slightly before visible
+    );
+
+    if (cardRef.current) {
+      observer.observe(cardRef.current);
+    }
+
+    return () => observer.disconnect();
+  }, [startLoading, state.pattern]);
 
   const handleClick = () => {
     if (state.pattern) {
       onSelect(state.pattern);
+    } else if (!state.loading && !state.error) {
+      // Start loading if not already started
+      startLoading();
     }
   };
 
+  // Format file size
+  const sizeLabel = entry.sizeKB < 10000
+    ? `${Math.round(entry.sizeKB / 1000)}MB`
+    : `${Math.round(entry.sizeKB / 1000)}MB`;
+
   return (
     <div
+      ref={cardRef}
       className="gallery-card"
-      style={styles.card}
+      style={{
+        ...styles.card,
+        opacity: state.pattern ? 1 : 0.8,
+        cursor: state.pattern ? 'pointer' : state.loading ? 'wait' : 'pointer',
+      }}
       onClick={handleClick}
       role="button"
       tabIndex={0}
       onKeyDown={e => e.key === 'Enter' && handleClick()}
     >
       <div style={styles.previewContainer}>
+        {!state.pattern && !state.loading && !state.error && (
+          <div style={styles.pendingPlaceholder}>
+            <span style={styles.pendingText}>Click to load</span>
+          </div>
+        )}
         {state.loading && (
           <div style={styles.loadingPlaceholder}>
             <div style={styles.spinner} />
+            <span style={styles.loadingText}>Loading...</span>
           </div>
         )}
         {state.error && (
@@ -138,11 +226,13 @@ function PatternPreviewCard({
       </div>
       <div style={styles.cardInfo}>
         <div style={styles.cardTitle}>{entry.displayName}</div>
-        {state.pattern && (
-          <div style={styles.cardDimensions}>
-            {state.pattern.width} x {state.pattern.height}
-          </div>
-        )}
+        <div style={styles.cardMeta}>
+          {state.pattern ? (
+            <span>{state.pattern.width} x {state.pattern.height}</span>
+          ) : (
+            <span style={styles.sizeLabel}>{sizeLabel}</span>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -151,6 +241,12 @@ function PatternPreviewCard({
 export function PatternGalleryModal({ onClose }: PatternGalleryModalProps) {
   const loadPattern = useGameStore(s => s.loadPattern);
   const [isLoading, setIsLoading] = useState(false);
+  const [loadedCount, setLoadedCount] = useState(patternCache.size);
+
+  // Update loaded count when cache changes
+  const incrementLoadedCount = useCallback(() => {
+    setLoadedCount(patternCache.size);
+  }, []);
 
   const handleSelectPattern = useCallback(async (pattern: PatternDoc) => {
     setIsLoading(true);
@@ -171,6 +267,9 @@ export function PatternGalleryModal({ onClose }: PatternGalleryModalProps) {
       <div style={styles.modal} onClick={e => e.stopPropagation()}>
         <div style={styles.header}>
           <h2 style={styles.title}>Pick a Pattern</h2>
+          <div style={styles.loadedCounter}>
+            {loadedCount} / {patternCatalog.length} loaded
+          </div>
           <button onClick={onClose} style={styles.closeButton} disabled={isLoading}>
             &times;
           </button>
@@ -188,6 +287,7 @@ export function PatternGalleryModal({ onClose }: PatternGalleryModalProps) {
                 key={entry.filename}
                 entry={entry}
                 onSelect={handleSelectPattern}
+                onLoaded={incrementLoadedCount}
               />
             ))}
           </div>
@@ -195,7 +295,7 @@ export function PatternGalleryModal({ onClose }: PatternGalleryModalProps) {
 
         <div style={styles.footer}>
           <div style={styles.footerHint}>
-            Click a pattern to start stitching
+            Patterns load as you scroll. Click any pattern to start stitching.
           </div>
           <button onClick={onClose} style={styles.cancelButton} disabled={isLoading}>
             Cancel
@@ -305,6 +405,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   loadingPlaceholder: {
     display: 'flex',
+    flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
     width: '100%',
@@ -347,6 +448,39 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: '0.75rem',
     color: '#888',
     marginTop: '0.25rem',
+  },
+  cardMeta: {
+    fontSize: '0.75rem',
+    color: '#888',
+    marginTop: '0.25rem',
+  },
+  sizeLabel: {
+    color: '#aaa',
+  },
+  loadedCounter: {
+    fontSize: '0.85rem',
+    color: '#666',
+    backgroundColor: '#f0f0f0',
+    padding: '0.25rem 0.75rem',
+    borderRadius: '1rem',
+  },
+  pendingPlaceholder: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+    height: '100%',
+    color: '#999',
+  },
+  pendingText: {
+    fontSize: '0.8rem',
+    color: '#999',
+  },
+  loadingText: {
+    fontSize: '0.75rem',
+    color: '#666',
+    marginTop: '0.5rem',
   },
   footer: {
     display: 'flex',
