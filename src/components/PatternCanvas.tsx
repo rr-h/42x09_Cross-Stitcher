@@ -401,7 +401,7 @@ export function PatternCanvas() {
     [baseCursorStyle, pattern, isComplete, selectedPaletteIndex, viewport, tryPlaceStitch]
   );
 
-  // Handle double-click for flood fill (shortcut to avoid switching to fill tool)
+  // Handle double-click for flood fill or removing wrong stitches (shortcuts to avoid switching tools)
   const handleDoubleClick = useCallback(
     (e: React.MouseEvent) => {
       // Cancel any pending single click timer since this is a double-click
@@ -413,11 +413,8 @@ export function PatternCanvas() {
       const rect = canvasRef.current?.getBoundingClientRect();
       if (!rect || !pattern || !progress || isComplete) return;
 
-      // Allow flood fill when in stitch mode (not picker or fill mode)
+      // Allow double-click actions when in stitch mode (not picker or fill mode)
       if (toolMode === 'picker' || toolMode === 'fill') return;
-
-      // Must have a color selected
-      if (selectedPaletteIndex === null) return;
 
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
@@ -431,8 +428,14 @@ export function PatternCanvas() {
       const state = getStitchState(cell.col, cell.row);
       const targetIdx = getTargetPaletteIndex(cell.col, cell.row);
 
-      // Only flood fill if cell is unstitched and matches selected color
-      if (state === StitchState.None && targetIdx === selectedPaletteIndex) {
+      // Priority 1: Remove wrong stitch if double-clicking on one
+      if (state === StitchState.Wrong) {
+        removeWrongStitch(cell.col, cell.row);
+        return;
+      }
+
+      // Priority 2: Flood fill if cell is unstitched and matches selected color
+      if (selectedPaletteIndex !== null && state === StitchState.None && targetIdx === selectedPaletteIndex) {
         floodFillStitch(cell.col, cell.row);
       }
     },
@@ -446,6 +449,7 @@ export function PatternCanvas() {
       getStitchState,
       getTargetPaletteIndex,
       floodFillStitch,
+      removeWrongStitch,
     ]
   );
 
