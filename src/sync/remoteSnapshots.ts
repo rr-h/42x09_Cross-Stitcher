@@ -35,7 +35,8 @@ async function getUserId(): Promise<string | null> {
 }
 
 export async function signInWithEmailOtp(email: string): Promise<void> {
-  const redirectTo = window.location.origin;
+  // Use full base URL including path (e.g., https://rr-h.github.io/42x09_Cross-Stitcher/)
+  const redirectTo = window.location.origin + import.meta.env.BASE_URL;
   const { error } = await supabase.auth.signInWithOtp({
     email,
     options: { emailRedirectTo: redirectTo },
