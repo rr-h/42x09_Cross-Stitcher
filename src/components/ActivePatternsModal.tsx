@@ -165,8 +165,8 @@ function ActivePatternCard({
       className="gallery-card"
       style={{
         ...styles.card,
-        opacity: state.pattern ? 1 : 0.8,
-        cursor: state.pattern ? 'pointer' : state.loading ? 'wait' : 'default',
+        opacity: 1,
+        cursor: state.pattern ? 'pointer' : 'default',
         position: 'relative',
       }}
       onClick={handleClick}
@@ -177,52 +177,53 @@ function ActivePatternCard({
       onKeyDown={e => e.key === 'Enter' && state.pattern && handleClick()}
     >
       <div style={styles.previewContainer}>
-        {state.loading && (
+        {state.loading && !state.previewDataUrl && (
           <div style={styles.loadingPlaceholder}>
             <div style={styles.spinner} />
             <span style={styles.loadingText}>Loading...</span>
           </div>
         )}
-        {state.error && (
+        {state.error && !state.previewDataUrl && (
           <div style={styles.errorPlaceholder}>
-            <span style={styles.errorIcon}>!</span>
-            <span style={styles.errorText}>{state.error}</span>
+            <span style={styles.placeholderText}>Pattern from upload</span>
           </div>
         )}
         {state.previewDataUrl && (
-          <>
-            <img
-              src={state.previewDataUrl}
-              alt={state.pattern?.meta.title || state.patternId}
-              style={styles.previewImage}
-            />
-            {/* Progress overlay */}
-            <div style={styles.progressOverlay}>
-              <div style={styles.progressBadge}>{state.progressPercent}%</div>
-            </div>
-            {/* Delete button on hover */}
-            {isHovered && (
-              <button
-                onClick={handleDelete}
-                style={styles.deleteButton}
-                title="Delete progress"
-                aria-label="Delete progress"
-              >
-                ×
-              </button>
-            )}
-          </>
+          <img
+            src={state.previewDataUrl}
+            alt={state.pattern?.meta.title || state.patternId}
+            style={styles.previewImage}
+          />
+        )}
+        {/* Progress overlay - always show */}
+        <div style={styles.progressOverlay}>
+          <div style={styles.progressBadge}>{state.progressPercent}%</div>
+        </div>
+        {/* Delete button on hover - always show */}
+        {isHovered && (
+          <button
+            onClick={handleDelete}
+            style={styles.deleteButton}
+            title="Delete progress"
+            aria-label="Delete progress"
+          >
+            ×
+          </button>
         )}
       </div>
       <div style={styles.cardInfo}>
-        <div style={styles.cardTitle}>{state.pattern?.meta.title || state.patternId}</div>
-        {state.pattern && (
-          <div style={styles.cardMeta}>
+        <div style={styles.cardTitle}>
+          {state.pattern?.meta.title || `Pattern ${state.patternId.substring(0, 8)}...`}
+        </div>
+        <div style={styles.cardMeta}>
+          {state.pattern ? (
             <span>
               {state.pattern.width} x {state.pattern.height}
             </span>
-          </div>
-        )}
+          ) : (
+            <span style={{ color: '#999' }}>Uploaded pattern</span>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -530,7 +531,7 @@ const styles: Record<string, React.CSSProperties> = {
     justifyContent: 'center',
     width: '100%',
     height: '100%',
-    backgroundColor: '#fee',
+    backgroundColor: '#f5f5f5',
     padding: '1rem',
   },
   errorIcon: {
@@ -543,6 +544,12 @@ const styles: Record<string, React.CSSProperties> = {
     color: '#c00',
     marginTop: '0.5rem',
     textAlign: 'center',
+  },
+  placeholderText: {
+    fontSize: '0.75rem',
+    color: '#888',
+    textAlign: 'center',
+    padding: '0 0.5rem',
   },
   cardInfo: {
     padding: '0.75rem',
