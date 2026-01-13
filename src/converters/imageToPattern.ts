@@ -1,8 +1,40 @@
-import { colorDistance, DMC_COLORS, rgbToHex, type DMCColor } from '../data/dmcColors';
+import { loadDmcColours, type DMCColor } from '../data/loadDmcColours';
+import { assignSymbolsForPalette, MAX_PALETTE_SIZE } from '../symbols';
 import type { PaletteEntry, PatternDoc, PatternMeta } from '../types';
 import { NO_STITCH } from '../types';
 import { hashString } from '../utils/hash';
-import { assignSymbolsForPalette, MAX_PALETTE_SIZE } from '../symbols';
+
+/**
+ * Calculate colour distance using weighted Euclidean distance (approximates human perception).
+ * Duplicated here to avoid loading the large DMC module just for this utility.
+ */
+function colorDistance(rgb1: [number, number, number], rgb2: [number, number, number]): number {
+  const rMean = (rgb1[0] + rgb2[0]) / 2;
+  const dR = rgb1[0] - rgb2[0];
+  const dG = rgb1[1] - rgb2[1];
+  const dB = rgb1[2] - rgb2[2];
+  const rWeight = 2 + rMean / 256;
+  const gWeight = 4;
+  const bWeight = 2 + (255 - rMean) / 256;
+  return Math.sqrt(rWeight * dR * dR + gWeight * dG * dG + bWeight * dB * dB);
+}
+
+/**
+ * Convert RGB to hex string.
+ * Duplicated here to avoid loading the large DMC module just for this utility.
+ */
+function rgbToHex(r: number, g: number, b: number): string {
+  return (
+    '#' +
+    [r, g, b]
+      .map(x => {
+        const hex = Math.round(Math.max(0, Math.min(255, x))).toString(16);
+        return hex.length === 1 ? '0' + hex : hex;
+      })
+      .join('')
+      .toUpperCase()
+  );
+}
 
 export interface ImageConversionOptions {
   maxWidth: number;
@@ -257,7 +289,8 @@ function findClosestPaletteIndex(
 
 // Map quantised colours to closest DMC colours, avoiding duplicates where possible
 function mapToDMC(
-  quantizedColors: [number, number, number][]
+  quantizedColors: [number, number, number][],
+  dmcColors: DMCColor[]
 ): { dmc: DMCColor; originalRgb: [number, number, number] }[] {
   const usedCodes = new Set<string>();
   const result: { dmc: DMCColor; originalRgb: [number, number, number] }[] = [];
@@ -267,7 +300,7 @@ function mapToDMC(
     let bestDist = Infinity;
 
     // Find closest DMC, penalising already-used colours
-    for (const dmc of DMC_COLORS) {
+    for (const dmc of dmcColors) {
       const dist = colorDistance(rgb, dmc.rgb);
       const adjustedDist = usedCodes.has(dmc.code) ? dist * 1.5 : dist;
 
@@ -298,6 +331,12 @@ export async function convertImageToPattern(
     );
   }
 
+  // Load DMC colours lazily (only when using DMC mode)
+  let dmcModule: Awaited<ReturnType<typeof loadDmcColours>> | null = null;
+  if (options.useDMCColors) {
+    dmcModule = await loadDmcColours();
+  }
+
   // Load and resize image
   const img = await loadImage(file);
   const { width, height } = calculateDimensions(
@@ -321,9 +360,9 @@ export async function convertImageToPattern(
   let paletteWithoutSymbols: PaletteEntryWithoutSymbol[];
   let paletteRgb: [number, number, number][];
 
-  if (options.useDMCColors) {
+  if (options.useDMCColors && dmcModule) {
     // Map to DMC colours (no symbol from DMC - symbols come from central pool)
-    const dmcMappings = mapToDMC(quantizedColors);
+    const dmcMappings = mapToDMC(quantizedColors, dmcModule.DMC_COLORS);
 
     paletteWithoutSymbols = dmcMappings.map((mapping, i) => ({
       paletteIndex: i,

@@ -3,12 +3,9 @@
 // Note: Symbols are NOT stored here. Symbol assignment is handled centrally
 // by the SymbolPool module to ensure uniqueness within each pattern.
 
-export interface DMCColor {
-  code: string;
-  name: string;
-  hex: string;
-  rgb: [number, number, number];
-}
+// Import type from separate file to allow importing type without the large data
+export type { DMCColor } from './dmcColorsTypes';
+import type { DMCColor } from './dmcColorsTypes';
 
 // Complete DMC colour palette: 489 colours
 export const DMC_COLORS: DMCColor[] = [

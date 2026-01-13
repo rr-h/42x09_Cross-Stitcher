@@ -6,6 +6,8 @@ vi.mock('../store/persistence', () => ({
   saveProgress: vi.fn().mockResolvedValue(undefined),
   loadProgress: vi.fn().mockResolvedValue(null),
   deleteProgress: vi.fn().mockResolvedValue(undefined),
+  savePattern: vi.fn().mockResolvedValue(undefined),
+  loadPattern: vi.fn().mockResolvedValue(null),
 }));
 
 // Import store after mocking

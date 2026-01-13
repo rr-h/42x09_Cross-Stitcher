@@ -19,10 +19,5 @@ export {
   u8ToPersisted,
 } from './persistence.ts';
 export type { PersistedPattern, PersistedProgress, PersistedSnapshot } from './persistence.ts';
-export {
-  checkCompletion,
-  countAnyStitches,
-  createInitialProgress,
-  useGameStore,
-} from './storeFunctions.ts';
+export { checkCompletion, createInitialProgress, useGameStore } from './storeFunctions.ts';
 export type { GameState, NavigationRequest } from './storeFunctions.ts';

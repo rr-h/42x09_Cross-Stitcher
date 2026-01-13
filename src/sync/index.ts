@@ -1,8 +1,8 @@
 export {
   BUCKET,
+  MAX_SLOTS,
   listRemoteSlots,
   loadLatestRemoteSnapshot,
-  MAX_SLOTS,
   parseSlot,
   pickSlotToWrite,
   saveRemoteRollingSnapshot,

@@ -50,6 +50,7 @@ export default [
         Promise: 'readonly',
         Error: 'readonly',
         React: 'readonly',
+        fetch: 'readonly',
       },
     },
     plugins: {

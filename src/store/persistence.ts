@@ -131,7 +131,6 @@ export async function deleteProgress(patternId: string): Promise<void> {
  * Save a pattern to IndexedDB so it can be reloaded later
  */
 export async function savePattern(pattern: PatternDoc): Promise<void> {
-  console.log('[Persistence] Saving pattern to IndexedDB:', pattern.id);
   const db = await getDB();
   const persisted: PersistedPattern = {
     id: pattern.id,
@@ -142,22 +141,18 @@ export async function savePattern(pattern: PatternDoc): Promise<void> {
     meta: pattern.meta,
   };
   await db.put(PATTERN_STORE, persisted);
-  console.log('[Persistence] Pattern saved successfully');
 }
 
 /**
  * Load a pattern from IndexedDB
  */
 export async function loadPattern(patternId: string): Promise<PatternDoc | null> {
-  console.log('[Persistence] Loading pattern from IndexedDB:', patternId);
   const db = await getDB();
   const persisted = (await db.get(PATTERN_STORE, patternId)) as PersistedPattern | undefined;
   if (!persisted) {
-    console.log('[Persistence] Pattern not found in IndexedDB');
     return null;
   }
 
-  console.log('[Persistence] Pattern loaded from IndexedDB');
   return {
     id: persisted.id,
     width: persisted.width,

@@ -13,6 +13,8 @@ export {
   worldToScreen,
 } from './coordinates.ts';
 export { hashString } from './hash.ts';
+export { chooseBestProgress, compareProgressSources, evaluateProgress } from './progressScoring.ts';
+export type { ProgressMetrics, ProgressSource } from './progressScoring.ts';
 export { cellSeed, createSeededRandom, getCellRandoms } from './random.ts';
 export {
   createOffscreenCanvas,
@@ -22,7 +24,11 @@ export {
   drawThreadStrand,
   drawWrongIndicator,
   FABRIC_COLOR,
-  FABRIC_HOLE_COLOR,
+  FABRIC_GRID_LINE,
+  FABRIC_HOLE_DARK,
+  FABRIC_HOLE_LIGHT,
+  FABRIC_WEAVE_DARK,
+  FABRIC_WEAVE_LIGHT,
   renderCanvas,
   SELECTED_COLOR_HIGHLIGHT,
   SYMBOL_COLOR,

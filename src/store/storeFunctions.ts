@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { loadLatestRemoteSnapshot } from '../sync/remoteSnapshots';
 import type {
   GridCell,
   PaletteCounts,
@@ -8,9 +9,9 @@ import type {
   ViewportTransform,
 } from '../types';
 import { NO_STITCH, StitchState } from '../types';
+import { chooseBestProgress } from '../utils/progressScoring';
 import { UnstitchedIndex } from '../utils/UnstitchedIndex';
-import { loadProgress, saveProgress, savePattern } from './persistence';
-import { loadLatestRemoteSnapshot } from '../sync/remoteSnapshots';
+import { loadProgress, savePattern, saveProgress } from './persistence';
 
 /**
  * Navigation request object. PatternCanvas subscribes to changes and
@@ -127,46 +128,11 @@ export function checkCompletion(_pattern: PatternDoc, paletteCounts: PaletteCoun
   return paletteCounts.every(pc => pc.remainingTargets === 0);
 }
 
-export function countAnyStitches(progress: UserProgress): number {
-  let count = 0;
-  const s = progress.stitchedState;
-  for (let i = 0; i < s.length; i++) {
-    if (s[i] !== StitchState.None) count++;
-  }
-  return count;
-}
-
 /** Counter for generating unique navigation request nonces */
 let navigationNonce = 0;
 
 export const useGameStore = create<GameState>((set, get) => {
   const touch = () => set({ lastInteractionAt: Date.now() });
-
-  const chooseBestProgress = (
-    pattern: PatternDoc,
-    local: UserProgress | null,
-    remote: UserProgress | null
-  ) => {
-    const expectedSize = pattern.width * pattern.height;
-
-    const localOk =
-      !!local && local.patternId === pattern.id && local.stitchedState.length === expectedSize;
-
-    const remoteOk =
-      !!remote && remote.patternId === pattern.id && remote.stitchedState.length === expectedSize;
-
-    if (localOk && remoteOk) {
-      // Heuristic: pick the one with more stitches. If tied, prefer remote.
-      const localCount = countAnyStitches(local!);
-      const remoteCount = countAnyStitches(remote!);
-      return remoteCount >= localCount ? remote! : local!;
-    }
-
-    if (remoteOk) return remote!;
-    if (localOk) return local!;
-
-    return null;
-  };
 
   return {
     pattern: null,

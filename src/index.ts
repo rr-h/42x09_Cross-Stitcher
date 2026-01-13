@@ -1,4 +1,4 @@
-export { App } from './App.ts';
+export { App } from './App.tsx';
 export {
   ActivePatternsModal,
   AuthButton,
@@ -31,17 +31,20 @@ export {
   getAllCodes,
   getColorCount,
   getColorFamily,
+  getDmcColours,
+  getDmcColoursIfLoaded,
+  isDmcColoursLoaded,
+  loadDmcColours,
   loadPatternFile,
   patternCatalog,
   rgbToHex,
   searchByName,
 } from './data';
-export type { DMCColor, PatternCatalogEntry } from './data';
+export type { DMCColor, DmcColourModule, PatternCatalogEntry } from './data';
 export { useAuth, useAutosaveSnapshots } from './hooks';
 export { parseFCJSON, parseOXS, parsePatternFile } from './parsers';
 export {
   checkCompletion,
-  countAnyStitches,
   createInitialProgress,
   deleteLocalSnapshots,
   deletePattern,
@@ -118,7 +121,9 @@ export {
   calculateFitViewport,
   CELL_SIZE,
   cellSeed,
+  chooseBestProgress,
   clampViewport,
+  compareProgressSources,
   createOffscreenCanvas,
   createSeededRandom,
   drawFabricBackground,
@@ -126,8 +131,13 @@ export {
   drawSymbol,
   drawThreadStrand,
   drawWrongIndicator,
+  evaluateProgress,
   FABRIC_COLOR,
-  FABRIC_HOLE_COLOR,
+  FABRIC_GRID_LINE,
+  FABRIC_HOLE_DARK,
+  FABRIC_HOLE_LIGHT,
+  FABRIC_WEAVE_DARK,
+  FABRIC_WEAVE_LIGHT,
   getCellRandoms,
   getViewportCenterInGrid,
   getVisibleGridBounds,
@@ -147,4 +157,4 @@ export {
   worldToGrid,
   worldToScreen,
 } from './utils';
-export type { ColorIndex, RenderContext } from './utils';
+export type { ColorIndex, ProgressMetrics, ProgressSource, RenderContext } from './utils';
