@@ -45,9 +45,9 @@ const PATTERN_BORDER_WIDTH_PX = 2; // screen pixels
 // -----------------------------
 // Asset URLs (public/)
 // -----------------------------
-const STITCH_SHEET_URL = '/assets/stitches/multiple-sprites-large.png';
-const STITCH_ALPHA_SHEET_URL = '/assets/stitches/multiple-sprites-large-alpha-high.png';
-
+const BASE_URL = import.meta.env.BASE_URL; // includes the GitHub Pages subpath
+const STITCH_SHEET_URL = `${BASE_URL}assets/stitches/multiple-sprites-large.png`;
+const STITCH_ALPHA_SHEET_URL = `${BASE_URL}assets/stitches/multiple-sprites-large-alpha-high.png`;
 // -----------------------------
 // Tunables
 // -----------------------------
