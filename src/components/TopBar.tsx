@@ -1,15 +1,23 @@
-import { useRef, useState } from 'react';
+import React, { Suspense, lazy, useMemo, useRef, useState } from 'react';
 import { isImageFile } from '../converters/imageToPattern';
 import { parsePatternFile } from '../parsers';
 import { useGameStore } from '../store/storeFunctions';
 import type { ViewportTransform } from '../types';
 import { calculateFitViewport, clampViewport } from '../utils/coordinates';
-import { ActivePatternsModal } from './ActivePatternsModal';
 import { AuthButton } from './AuthButton';
-import { ImageImportModal } from './ImageImportModal';
-import { PatternGalleryModal } from './PatternGalleryModal';
 
-export function TopBar() {
+// Lazy load modals to reduce initial bundle size
+const ImageImportModal = lazy(() =>
+  import('./ImageImportModal').then(module => ({ default: module.ImageImportModal }))
+);
+const PatternGalleryModal = lazy(() =>
+  import('./PatternGalleryModal').then(module => ({ default: module.PatternGalleryModal }))
+);
+const ActivePatternsModal = lazy(() =>
+  import('./ActivePatternsModal').then(module => ({ default: module.ActivePatternsModal }))
+);
+
+export const TopBar = React.memo(function TopBar() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const [imageFile, setImageFile] = useState<File | null>(null);
@@ -121,13 +129,13 @@ export function TopBar() {
     setViewport(fitViewport);
   };
 
-  // Calculate progress percentage
-  let progressPercent = 0;
-  if (pattern && progress) {
+  // Calculate progress percentage (memoized to avoid recalculation on every render)
+  const progressPercent = useMemo(() => {
+    if (!pattern || !progress) return 0;
     const totalTargets = pattern.palette.reduce((sum, p) => sum + p.totalTargets, 0);
     const completedTargets = progress.paletteCounts.reduce((sum, pc) => sum + pc.correctCount, 0);
-    progressPercent = totalTargets > 0 ? Math.round((completedTargets / totalTargets) * 100) : 0;
-  }
+    return totalTargets > 0 ? Math.round((completedTargets / totalTargets) * 100) : 0;
+  }, [pattern, progress]);
 
   return (
     <div className="topbar">
@@ -267,14 +275,20 @@ export function TopBar() {
         <AuthButton />
       </div>
 
-      {imageFile && <ImageImportModal file={imageFile} onClose={handleCloseImageModal} />}
+      <Suspense fallback={null}>
+        {imageFile && <ImageImportModal file={imageFile} onClose={handleCloseImageModal} />}
+      </Suspense>
 
-      {showGallery && <PatternGalleryModal onClose={() => setShowGallery(false)} />}
+      <Suspense fallback={null}>
+        {showGallery && <PatternGalleryModal onClose={() => setShowGallery(false)} />}
+      </Suspense>
 
-      {showActivePatterns && <ActivePatternsModal onClose={() => setShowActivePatterns(false)} />}
+      <Suspense fallback={null}>
+        {showActivePatterns && <ActivePatternsModal onClose={() => setShowActivePatterns(false)} />}
+      </Suspense>
     </div>
   );
-}
+});
 
 const styles: Record<string, React.CSSProperties> = {
   button: {

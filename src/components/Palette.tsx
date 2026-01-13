@@ -1,8 +1,8 @@
-import type React from 'react';
+import React, { useCallback, useMemo } from 'react';
 import { useGameStore } from '../store/storeFunctions';
 import { getViewportCenterInGrid } from '../utils/coordinates';
 
-export function Palette() {
+export const Palette = React.memo(function Palette() {
   const pattern = useGameStore(s => s.pattern);
   const progress = useGameStore(s => s.progress);
   const selectedPaletteIndex = useGameStore(s => s.selectedPaletteIndex);
@@ -28,12 +28,15 @@ export function Palette() {
 
   const wrongCount = getTotalWrongCount();
 
-  // Filter palette to only show entries with remaining stitches
-  const visiblePalette = pattern.palette.filter(
-    (_, index) => progress.paletteCounts[index].remainingTargets > 0
+  // Filter palette to only show entries with remaining stitches (memoized)
+  const visiblePalette = useMemo(
+    () => pattern.palette.filter(
+      (_, index) => progress.paletteCounts[index].remainingTargets > 0
+    ),
+    [pattern.palette, progress.paletteCounts]
   );
 
-  const handlePaletteClick = (paletteIndex: number) => {
+  const handlePaletteClick = useCallback((paletteIndex: number) => {
     selectPalette(paletteIndex);
 
     if (!pattern) return;
@@ -54,7 +57,7 @@ export function Palette() {
       const cellIndex = nearest.row * pattern.width + nearest.col;
       navigateToCell(cellIndex, { animate: true });
     }
-  };
+  }, [pattern, viewport, selectPalette, findNearestUnstitched, navigateToCell]);
 
   return (
     <div className="palette-container">
@@ -118,7 +121,7 @@ export function Palette() {
       </div>
     </div>
   );
-}
+});
 
 const styles: Record<string, React.CSSProperties> = {
   header: {

@@ -14,6 +14,34 @@ import { UnstitchedIndex } from '../utils/UnstitchedIndex';
 import { loadProgress, savePattern, saveProgress } from './persistence';
 
 /**
+ * Debounced saveProgress to reduce IndexedDB write frequency.
+ * Batches multiple rapid save calls into a single delayed write.
+ */
+let saveProgressTimeoutId: number | null = null;
+let pendingProgress: UserProgress | null = null;
+
+function debouncedSaveProgress(progress: UserProgress, delayMs: number = 500): void {
+  // Store the latest progress to save
+  pendingProgress = progress;
+
+  // Clear existing timeout
+  if (saveProgressTimeoutId !== null) {
+    clearTimeout(saveProgressTimeoutId);
+  }
+
+  // Schedule new save
+  saveProgressTimeoutId = window.setTimeout(() => {
+    if (pendingProgress) {
+      saveProgress(pendingProgress).catch(err => {
+        console.error('Failed to save progress:', err);
+      });
+      pendingProgress = null;
+    }
+    saveProgressTimeoutId = null;
+  }, delayMs);
+}
+
+/**
  * Navigation request object. PatternCanvas subscribes to changes and
  * centers the viewport on the requested cell. The nonce ensures that
  * repeat requests to the same cell are handled (not ignored due to
@@ -194,7 +222,7 @@ export const useGameStore = create<GameState>((set, get) => {
           toolMode: 'stitch',
           progress: updatedProgress,
         });
-        saveProgress(updatedProgress);
+        debouncedSaveProgress(updatedProgress);
       } else {
         set({ selectedPaletteIndex: index, toolMode: 'stitch' });
       }
@@ -263,7 +291,8 @@ export const useGameStore = create<GameState>((set, get) => {
         showCelebration: isNowComplete && !wasComplete,
       });
 
-      saveProgress(updatedProgress);
+      // Use debounced save for individual stitches to reduce I/O overhead
+      debouncedSaveProgress(updatedProgress);
     },
 
     floodFillStitch: (col: number, row: number) => {
@@ -402,7 +431,9 @@ export const useGameStore = create<GameState>((set, get) => {
       if (progress) {
         const updatedProgress = { ...progress, viewport };
         set({ progress: updatedProgress });
-        saveProgress(updatedProgress);
+        // Viewport changes are frequent, so we debounce to avoid excessive I/O
+        // The viewport will be saved when other progress updates occur
+        debouncedSaveProgress(updatedProgress, 1000); // Longer delay for viewport
       }
     },
 

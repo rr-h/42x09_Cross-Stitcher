@@ -1,7 +1,11 @@
-import { useState } from 'react';
+import { Suspense, lazy, useState } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { signOut } from '../sync/remoteSnapshots';
-import { LoginModal } from './LoginModal';
+
+// Lazy load LoginModal to reduce initial bundle size
+const LoginModal = lazy(() =>
+  import('./LoginModal').then(module => ({ default: module.LoginModal }))
+);
 
 export function AuthButton() {
   const { user, loading } = useAuth();
@@ -45,7 +49,9 @@ export function AuthButton() {
       <button onClick={() => setShowLogin(true)} style={styles.signInButton}>
         Sign In
       </button>
-      {showLogin && <LoginModal onClose={() => setShowLogin(false)} />}
+      <Suspense fallback={null}>
+        {showLogin && <LoginModal onClose={() => setShowLogin(false)} />}
+      </Suspense>
     </>
   );
 }

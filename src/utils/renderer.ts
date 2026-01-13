@@ -118,6 +118,71 @@ function getNoiseTile(
 
 const fabricPatternCache = new Map<string, CanvasPattern>();
 
+// ---- Stitch LRU cache ----
+
+interface CachedStitch {
+  canvas: HTMLCanvasElement | OffscreenCanvas;
+  lastUsed: number;
+}
+
+const stitchCache = new Map<string, CachedStitch>();
+const MAX_STITCH_CACHE_SIZE = 1000; // Limit cache size
+let cacheAccessCounter = 0;
+
+function getStitchCacheKey(color: string, cellScreenSize: number, col: number, row: number): string {
+  // Round cellScreenSize to nearest 4px to increase cache hits
+  const roundedSize = Math.round(cellScreenSize / 4) * 4;
+  return `${color}|${roundedSize}|${col}|${row}`;
+}
+
+function getCachedStitch(
+  color: string,
+  cellScreenSize: number,
+  col: number,
+  row: number
+): HTMLCanvasElement | OffscreenCanvas | null {
+  const key = getStitchCacheKey(color, cellScreenSize, col, row);
+  const cached = stitchCache.get(key);
+
+  if (cached) {
+    cached.lastUsed = ++cacheAccessCounter;
+    return cached.canvas;
+  }
+
+  return null;
+}
+
+function cacheStitch(
+  color: string,
+  cellScreenSize: number,
+  col: number,
+  row: number,
+  canvas: HTMLCanvasElement | OffscreenCanvas
+): void {
+  // Evict oldest entries if cache is full
+  if (stitchCache.size >= MAX_STITCH_CACHE_SIZE) {
+    let oldestKey: string | null = null;
+    let oldestTime = Infinity;
+
+    for (const [key, entry] of stitchCache.entries()) {
+      if (entry.lastUsed < oldestTime) {
+        oldestTime = entry.lastUsed;
+        oldestKey = key;
+      }
+    }
+
+    if (oldestKey) {
+      stitchCache.delete(oldestKey);
+    }
+  }
+
+  const key = getStitchCacheKey(color, cellScreenSize, col, row);
+  stitchCache.set(key, {
+    canvas,
+    lastUsed: ++cacheAccessCounter,
+  });
+}
+
 function getFabricPattern(
   ctx: CanvasRenderingContext2D,
   cellScreenSize: number
@@ -203,7 +268,7 @@ function getFabricPattern(
 
 // Cover the stitch ends so they look like they disappear into the cloth.
 function drawHoleOverlay(
-  ctx: CanvasRenderingContext2D,
+  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
   x: number,
   y: number,
   r: number,
@@ -311,7 +376,7 @@ export function drawSymbol(
 
 // Tapered, textured ribbon strand that fades into holes.
 export function drawThreadStrand(
-  ctx: CanvasRenderingContext2D,
+  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
   x0: number,
   y0: number,
   x1: number,
@@ -544,7 +609,7 @@ export function drawRealisticStitch(
 ): void {
   const randoms = getCellRandoms(col, row);
 
-  // Cheap fallback when zoomed out
+  // Cheap fallback when zoomed out (no caching needed)
   if (cellScreenSize < 12) {
     const pad = cellScreenSize * 0.18;
     const x0 = screenX + pad;
@@ -565,6 +630,46 @@ export function drawRealisticStitch(
     return;
   }
 
+  // Check if we have a cached version of this stitch
+  const cached = getCachedStitch(color, cellScreenSize, col, row);
+  if (cached) {
+    ctx.drawImage(cached as any, screenX, screenY);
+    return;
+  }
+
+  // Render to offscreen canvas for caching
+  const roundedSize = Math.round(cellScreenSize / 4) * 4;
+  const offscreen = createOffscreenCanvas(roundedSize, roundedSize);
+  const offCtx = offscreen.getContext('2d') as
+    | CanvasRenderingContext2D
+    | OffscreenCanvasRenderingContext2D
+    | null;
+
+  if (!offCtx) {
+    // Fallback: draw directly if offscreen context creation fails
+    drawRealisticStitchInternal(ctx, 0, 0, roundedSize, color, randoms);
+    return;
+  }
+
+  // Render to offscreen canvas
+  drawRealisticStitchInternal(offCtx as any, 0, 0, roundedSize, color, randoms);
+
+  // Cache the rendered stitch
+  cacheStitch(color, cellScreenSize, col, row, offscreen);
+
+  // Draw the cached version to the main canvas
+  ctx.drawImage(offscreen as any, screenX, screenY);
+}
+
+// Internal rendering function (used for both direct and cached rendering)
+function drawRealisticStitchInternal(
+  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+  screenX: number,
+  screenY: number,
+  cellScreenSize: number,
+  color: string,
+  randoms: ReturnType<typeof getCellRandoms>
+): void {
   // Hole centres (fixed endpoints, variation happens inside the strand)
   const inset = clamp(cellScreenSize * 0.06, 1.0, cellScreenSize * 0.14);
   const hxL = screenX + inset;

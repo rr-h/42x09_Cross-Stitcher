@@ -48,7 +48,7 @@ function getTouchCenter(touches: React.TouchList, rect: DOMRect): { x: number; y
   };
 }
 
-export function PatternCanvas() {
+export const PatternCanvas = React.memo(function PatternCanvas() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [size, setSize] = useState({ width: 800, height: 600 });
@@ -750,4 +750,4 @@ export function PatternCanvas() {
       )}
     </div>
   );
-}
+});
