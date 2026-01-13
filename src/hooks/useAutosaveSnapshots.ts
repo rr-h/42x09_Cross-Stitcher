@@ -21,7 +21,8 @@ const RETRY_MAX_MS = 2 * 60 * 1000; // 2 minutes
 /** Quick retry delay when coming back online */
 const ONLINE_RETRY_MS = 5 * 1000; // 5 seconds
 
-const isDev = import.meta.env.DEV;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const isDev = (import.meta as any).env.DEV;
 
 function log(...args: unknown[]): void {
   if (isDev) {
