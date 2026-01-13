@@ -240,7 +240,7 @@ App
 6. Calculate new viewport to center on that cell
 7. Animate/update viewport
 
-## Testing Strategy
+## Testing
 
 ### Unit Tests (Vitest)
 
