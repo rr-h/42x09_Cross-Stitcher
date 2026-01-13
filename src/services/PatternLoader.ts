@@ -15,7 +15,24 @@ const DB_NAME = 'pattern-cache';
 const DB_VERSION = 1;
 const STORE_NAME = 'patterns';
 const CACHE_EXPIRY_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+// GitHub repository info for fetching patterns from raw URLs
+const GITHUB_REPO_OWNER = 'rr-h';
+const GITHUB_REPO_NAME = '42x09_Cross-Stitcher';
+const GITHUB_BRANCH = 'main';
 
+// Construct pattern URL based on environment
+function getPatternUrl(filename: string): string {
+  const isDev = import.meta.env.DEV;
+
+  if (isDev) {
+    // Development: fetch from local dev server
+    return `/patterns/${filename}`;
+  } else {
+    // Production: fetch from GitHub raw content
+    // This avoids bundling 591MB of patterns in the deployment
+    return `https://raw.githubusercontent.com/${GITHUB_REPO_OWNER}/${GITHUB_REPO_NAME}/${GITHUB_BRANCH}/public/patterns/${filename}`;
+  }
+}
 interface CachedPattern {
   path: string;
   data: ArrayBuffer;
@@ -88,11 +105,12 @@ export class PatternLoader {
     }
 
     // Fetch from network
+    const url = getPatternUrl(path);
     console.log(`[PatternLoader] Fetching from network: ${path}`);
-    const response = await fetch(`/patterns/${path}`);
+    const response = await fetch(url);
 
     if (!response.ok) {
-      throw new Error(`Failed to load pattern: ${response.statusText}`);
+      throw new Error(`Failed to load pattern: ${response.statusText} (${response.status})`);
     }
 
     const contentLength = response.headers.get('content-length');

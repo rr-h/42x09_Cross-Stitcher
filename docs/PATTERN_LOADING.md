@@ -8,10 +8,12 @@ The app uses a sophisticated lazy-loading and caching system for pattern files t
 
 ### 1. Storage Location
 
-Patterns are stored in `/public/patterns/` directory and served as static assets (not bundled by Vite).
+Patterns are stored in `/public/patterns/` directory but **not** deployed with the app.
 
 - **Development**: Loaded from local dev server at `/patterns/`
-- **Production**: Served from GitHub Pages static files
+- **Production**: Fetched from GitHub raw URLs: `https://raw.githubusercontent.com/rr-h/42x09_Cross-Stitcher/main/public/patterns/filename.oxs`
+
+This keeps the deployment artifact small (3.9MB) while making patterns accessible from GitHub's CDN.
 
 ### 2. PatternLoader Service
 

@@ -30,10 +30,21 @@ Implemented a lazy-loading and caching system that:
 
 ### 1. Pattern Storage
 
-Patterns moved from `src/patterns/` to `public/patterns/`:
+Patterns stored in `public/patterns/` but **not** deployed:
 - Not bundled by Vite
-- Served as static assets
-- Not included in dist/ during build
+- Not copied to dist/ during build
+- Fetched from GitHub raw URLs in production
+- Fetched from local dev server in development
+
+**Production URL pattern:**
+```
+https://raw.githubusercontent.com/rr-h/42x09_Cross-Stitcher/main/public/patterns/example.oxs
+```
+
+**Development URL pattern:**
+```
+http://localhost:5173/patterns/example.oxs
+```
 
 ### 2. Custom Build Script
 
@@ -54,11 +65,21 @@ publicDir: false  // Use custom script instead
 ### 4. PatternLoader Service
 
 [`src/services/PatternLoader.ts`](../src/services/PatternLoader.ts) implements:
+- **Dual URL strategy**: GitHub raw URLs in production, local paths in development
 - IndexedDB caching with 7-day expiration
 - Progress tracking for downloads
 - De-duplication of concurrent requests
 - Background preloading queue
-- Cache management (stats, clear, etc)
+- Cache management (stats, clear, cleanup)
+
+**Environment detection:**
+```typescript
+if (isDev) {
+  // Development: /patterns/example.oxs
+} else {
+  // Production: https://raw.githubusercontent.com/.../example.oxs
+}
+```
 
 ### 5. React Hooks
 
