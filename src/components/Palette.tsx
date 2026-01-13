@@ -106,7 +106,7 @@ export const Palette = React.memo(function Palette() {
               <div className="palette-symbol" style={styles.symbol}>
                 {entry.symbol}
               </div>
-              <div style={styles.info}>
+              <div className="palette-info" style={styles.info}>
                 <div style={styles.name}>{entry.name}</div>
                 <div style={styles.code}>
                   {entry.brand && entry.code ? `${entry.brand} ${entry.code}` : entry.code || ''}
@@ -183,21 +183,21 @@ const styles: Record<string, React.CSSProperties> = {
     backgroundColor: '#E8F0E7',
   },
   swatch: {
-    width: '32px',
-    height: '32px',
+    width: '28px',
+    height: '28px',
     borderRadius: '4px',
     border: '1px solid #ccc',
     flexShrink: 0,
   },
   symbol: {
-    width: '24px',
-    height: '24px',
+    width: '22px',
+    height: '22px',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
     fontFamily: 'monospace',
     fontWeight: 'bold',
-    fontSize: '1rem',
+    fontSize: '0.9rem',
     backgroundColor: '#fff',
     border: '1px solid #ddd',
     borderRadius: '4px',

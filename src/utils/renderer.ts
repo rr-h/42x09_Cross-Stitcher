@@ -660,7 +660,7 @@ export function drawRealisticStitch(
   ctx.shadowOffsetY = 0;
 
   const inset = clamp(cellScreenSize * 0.05, 0.8, 2.8);
-  const scale = 1.06; // 6% bigger
+  const scale = 1.1; // 10% bigger
   const base = cellScreenSize - inset * 2;
   const ds = base * scale;
   const dx = screenX + inset + jx;
