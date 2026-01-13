@@ -5,6 +5,7 @@ import { getAllPatternsWithProgress } from '../store/persistence';
 import { useGameStore } from '../store/storeFunctions';
 import type { PatternDoc } from '../types';
 import { NO_STITCH } from '../types';
+import { getCachedPattern, setCachedPattern, getCachedPatternList } from '../utils/patternCache';
 
 interface PatternGalleryModalProps {
   onClose: () => void;
@@ -99,7 +100,7 @@ function PatternPreviewCard({
   progressPercent?: number;
 }) {
   const [state, setState] = useState<PreviewState>(() => {
-    // Check cache first
+    // Check in-memory cache first
     const cached = patternCache.get(entry.filename);
     if (cached) {
       return {
@@ -119,6 +120,27 @@ function PatternPreviewCard({
 
   const cardRef = useRef<HTMLDivElement>(null);
   const loadStartedRef = useRef(false);
+  const persistentCacheCheckedRef = useRef(false);
+
+  // Check persistent cache on mount (IndexedDB)
+  useEffect(() => {
+    if (persistentCacheCheckedRef.current || state.pattern) return;
+    persistentCacheCheckedRef.current = true;
+
+    getCachedPattern(entry.filename).then(cached => {
+      if (cached && !state.pattern) {
+        // Restore from persistent cache
+        patternCache.set(entry.filename, cached);
+        setState({
+          pattern: cached.pattern,
+          loading: false,
+          error: null,
+          previewDataUrl: cached.previewDataUrl,
+        });
+        onLoaded?.();
+      }
+    });
+  }, [entry.filename, state.pattern, onLoaded]);
 
   const startLoading = useCallback(() => {
     if (loadStartedRef.current || state.pattern) return;
@@ -132,8 +154,13 @@ function PatternPreviewCard({
         const pattern = await parseOXS(content);
         const previewDataUrl = generatePreviewImage(pattern, 150);
 
-        // Cache the result
+        // Cache the result in memory
         patternCache.set(entry.filename, { pattern, previewDataUrl });
+
+        // Cache the result in IndexedDB for persistence
+        setCachedPattern(entry.filename, pattern, previewDataUrl).catch(err => {
+          console.warn('Failed to save pattern to persistent cache:', err);
+        });
 
         setState({
           pattern,
@@ -254,8 +281,9 @@ export function PatternGalleryModal({ onClose }: PatternGalleryModalProps) {
   const [loadedCount, setLoadedCount] = useState(patternCache.size);
   const [progressMap, setProgressMap] = useState<Map<string, number>>(new Map());
 
-  // Load all progress data on mount
+  // Load progress data and cached pattern count on mount
   useEffect(() => {
+    // Load progress data
     getAllPatternsWithProgress()
       .then(patterns => {
         const map = new Map<string, number>();
@@ -266,6 +294,15 @@ export function PatternGalleryModal({ onClose }: PatternGalleryModalProps) {
       })
       .catch(err => {
         console.error('Failed to load progress data:', err);
+      });
+
+    // Update loaded count from persistent cache
+    getCachedPatternList()
+      .then(cachedFilenames => {
+        setLoadedCount(cachedFilenames.length);
+      })
+      .catch(err => {
+        console.warn('Failed to get cached pattern list:', err);
       });
   }, []);
 

@@ -36,3 +36,11 @@ export {
 export type { RenderContext } from './renderer.ts';
 export { NOT_A_TARGET, TILE_SIZE, UnstitchedIndex } from './UnstitchedIndex.ts';
 export type { ColorIndex } from './UnstitchedIndex.ts';
+export {
+  clearAllCaches,
+  clearOldCache,
+  getCachedPattern,
+  getCachedPatternFile,
+  getCachedPatternList,
+  setCachedPattern,
+} from './patternCache.ts';

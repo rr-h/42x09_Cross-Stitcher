@@ -67,11 +67,47 @@ export const patternCatalog: PatternCatalogEntry[] = patternData.map(({ filename
 }));
 
 // Load pattern file content from the bundled assets
+// Uses Cache API to avoid re-downloading files across sessions
 export async function loadPatternFile(filename: string): Promise<string> {
   const url = new URL(`../patterns/${filename}`, import.meta.url).href;
+
+  // Try to get from Cache API first
+  if ('caches' in window) {
+    try {
+      const cache = await caches.open('pattern-files-v1');
+      const cachedResponse = await cache.match(url);
+
+      if (cachedResponse) {
+        return await cachedResponse.text();
+      }
+    } catch (error) {
+      console.warn('Cache API error, falling back to network:', error);
+    }
+  }
+
+  // Fetch from network
   const response = await fetch(url);
   if (!response.ok) {
     throw new Error(`Failed to load pattern: ${filename}`);
   }
-  return response.text();
+
+  const content = await response.text();
+
+  // Cache the response for future use
+  if ('caches' in window) {
+    try {
+      const cache = await caches.open('pattern-files-v1');
+      const cacheResponse = new Response(content, {
+        headers: {
+          'Content-Type': 'text/plain',
+          'Cache-Control': 'max-age=31536000', // 1 year
+        },
+      });
+      await cache.put(url, cacheResponse);
+    } catch (error) {
+      console.warn('Failed to cache pattern file:', error);
+    }
+  }
+
+  return content;
 }
