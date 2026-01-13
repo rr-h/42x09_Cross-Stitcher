@@ -121,3 +121,16 @@ export async function loadLatestRemoteSnapshot(patternId: string): Promise<UserP
   const snap = await decodeProgressSnapshot(new Uint8Array(ab));
   return snapshotToProgress(snap);
 }
+
+export async function deleteRemoteSnapshots(patternId: string): Promise<void> {
+  const userId = await getUserId();
+  if (!userId) return; // not signed in, nothing to do
+
+  const slots = await listRemoteSlots(patternId);
+  if (slots.length === 0) return;
+
+  // Delete all slot files for this pattern
+  const paths = slots.map(slot => slot.path);
+  const { error } = await supabase.storage.from(BUCKET).remove(paths);
+  if (error) throw error;
+}

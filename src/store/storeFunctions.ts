@@ -11,7 +11,7 @@ import type {
 import { NO_STITCH, StitchState } from '../types';
 import { chooseBestProgress } from '../utils/progressScoring';
 import { UnstitchedIndex } from '../utils/UnstitchedIndex';
-import { loadProgress, savePattern, saveProgress } from './persistence';
+import { loadProgress, savePattern, saveProgress, cleanupPatternProgress } from './persistence';
 
 /**
  * Debounced saveProgress to reduce IndexedDB write frequency.
@@ -291,8 +291,20 @@ export const useGameStore = create<GameState>((set, get) => {
         showCelebration: isNowComplete && !wasComplete,
       });
 
-      // Use debounced save for individual stitches to reduce I/O overhead
-      debouncedSaveProgress(updatedProgress);
+      // If pattern just completed, clean up progress after a delay
+      if (isNowComplete && !wasComplete) {
+        // Wait a moment to let the celebration show, then clean up
+        setTimeout(async () => {
+          try {
+            await cleanupPatternProgress(pattern.id);
+          } catch (error) {
+            console.error('Failed to cleanup pattern progress:', error);
+          }
+        }, 2000); // 2 second delay to show celebration first
+      } else {
+        // Use debounced save for individual stitches to reduce I/O overhead
+        debouncedSaveProgress(updatedProgress);
+      }
     },
 
     floodFillStitch: (col: number, row: number) => {
@@ -383,7 +395,19 @@ export const useGameStore = create<GameState>((set, get) => {
         showCelebration: isNowComplete && !wasComplete,
       });
 
-      saveProgress(updatedProgress);
+      // If pattern just completed, clean up progress after a delay
+      if (isNowComplete && !wasComplete) {
+        // Wait a moment to let the celebration show, then clean up
+        setTimeout(async () => {
+          try {
+            await cleanupPatternProgress(pattern.id);
+          } catch (error) {
+            console.error('Failed to cleanup pattern progress:', error);
+          }
+        }, 2000); // 2 second delay to show celebration first
+      } else {
+        saveProgress(updatedProgress);
+      }
     },
 
     removeWrongStitch: (col: number, row: number) => {
@@ -462,6 +486,9 @@ export const useGameStore = create<GameState>((set, get) => {
 
     closeCelebration: () => {
       set({ showCelebration: false });
+      // After closing celebration, reset to go back to pattern selection
+      // This ensures the completed pattern is cleared from view
+      get().reset();
     },
 
     setShowActivePatterns: (show: boolean) => {

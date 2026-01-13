@@ -291,3 +291,25 @@ export async function getAllPatternsWithProgress(): Promise<
     })
     .filter(item => item.progressPercent > 0 && item.progressPercent < 100); // Only include started but not completed patterns
 }
+
+/**
+ * Clean up all progress data for a pattern (local and remote).
+ * Used when a pattern is completed to reset it for future plays.
+ */
+export async function cleanupPatternProgress(patternId: string): Promise<void> {
+  // Import deleteRemoteSnapshots dynamically to avoid circular dependencies
+  const { deleteRemoteSnapshots } = await import('../sync/remoteSnapshots');
+
+  // Delete local data
+  await deleteProgress(patternId);
+  await deleteLocalSnapshots(patternId);
+  await deletePattern(patternId);
+
+  // Delete remote snapshots from Supabase
+  try {
+    await deleteRemoteSnapshots(patternId);
+  } catch (error) {
+    // Log but don't throw - allow local cleanup to succeed even if remote fails
+    console.error('Failed to delete remote snapshots:', error);
+  }
+}
