@@ -7,18 +7,16 @@ import { CELL_SIZE, getVisibleGridBounds, worldToScreen } from './coordinates';
 import { getCellRandoms } from './random';
 
 /*
-  Sprite-based renderer
+  Sprite-based stitch renderer (cloth removed)
 
   Assets expected under public/:
-    /assets/cloth/cloth-sprite.png
     /assets/stitches/multiple-sprites-large.png
     /assets/stitches/multiple-sprites-large-alpha-high.png
 
-  Key behaviour:
-  - Cloth is drawn in pattern space: it pans + zooms with viewport.
-  - Cloth is clipped to the pattern bounds only.
-  - Cloth tile size is tied to the cell size at current zoom so it matches stitches.
-  - Stitches are stamped from a sprite sheet, tinted to DMC colours, cached per size + colour + variant.
+  Changes:
+  - No cloth sprite is drawn.
+  - Pattern area gets a flat backing colour.
+  - A border is drawn around the pattern bounds.
 */
 
 // -----------------------------
@@ -34,23 +32,25 @@ export const FABRIC_WEAVE_LIGHT = 'rgba(255, 255, 255, 0.07)';
 export const SYMBOL_COLOR = '#666666';
 export const SELECTED_COLOR_HIGHLIGHT = 'rgba(100, 149, 237, 0.28)';
 
+export const FABRIC_GRID_LINE = 'rgba(0, 0, 0, 0.05)';
+
+// -----------------------------
+// Pattern backing + border settings
+// -----------------------------
+const CANVAS_BG_COLOR = '#EFEDE7'; // outside-pattern area
+const PATTERN_BG_COLOR = FABRIC_COLOR; // inside-pattern backing
+const PATTERN_BORDER_COLOR = 'rgba(0, 0, 0, 0.25)';
+const PATTERN_BORDER_WIDTH_PX = 2; // screen pixels
+
 // -----------------------------
 // Asset URLs (public/)
 // -----------------------------
-const CLOTH_URL = '/assets/cloth/cloth-sprite.png';
 const STITCH_SHEET_URL = '/assets/stitches/multiple-sprites-large.png';
 const STITCH_ALPHA_SHEET_URL = '/assets/stitches/multiple-sprites-large-alpha-high.png';
 
 // -----------------------------
 // Tunables
 // -----------------------------
-export const FABRIC_GRID_LINE = 'rgba(0, 0, 0, 0.05)';
-
-// Cloth tiling: how many cells wide is one cloth texture repeat
-// 1 means "one cloth tile per cell" (matches stitch dimensions).
-// 2 means "one cloth tile spans 2 cells" (coarser fabric).
-const CLOTH_TILE_CELLS = 2;
-
 const STITCH_SHADOW_ALPHA = 0.1;
 const STITCH_HIGHLIGHT_PASS_ALPHA = 0.22;
 const STITCH_NOISE_ALPHA = 0.08;
@@ -76,7 +76,6 @@ export interface RenderContext {
 type Rect = { sx: number; sy: number; sw: number; sh: number };
 
 type LoadedAssets = {
-  cloth: ImageBitmap;
   stitchSheet: ImageBitmap;
   stitchAlphaSheet: ImageBitmap;
   variantRects: Rect[];
@@ -89,10 +88,6 @@ type LoadedAssets = {
 let assets: LoadedAssets | null = null;
 let assetsPromise: Promise<void> | null = null;
 let assetsFailed = false;
-
-// Cloth pattern is context-sensitive and scale/pan-dependent, so we build it per ctx
-let clothPatternBase: CanvasPattern | null = null;
-let clothPatternBaseCtx: CanvasRenderingContext2D | null = null;
 
 const stampCache = new Map<string, OffscreenCanvas | HTMLCanvasElement>();
 const noiseCache = new Map<string, OffscreenCanvas | HTMLCanvasElement>();
@@ -178,10 +173,8 @@ function noiseTile(size: number, alpha: number, seed: number): OffscreenCanvas |
 
 function getPatternScreenRect(rc: RenderContext): { x: number; y: number; w: number; h: number } {
   const { pattern, viewport } = rc;
-
   const tl = worldToScreen(0, 0, viewport);
   const br = worldToScreen(pattern.width * CELL_SIZE, pattern.height * CELL_SIZE, viewport);
-
   const x = Math.min(tl.x, br.x);
   const y = Math.min(tl.y, br.y);
   const w = Math.abs(br.x - tl.x);
@@ -196,7 +189,6 @@ async function loadBitmap(url: string): Promise<ImageBitmap> {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Failed to load ${url}: ${res.status}`);
   const blob = await res.blob();
-
   const fn = globalThis.createImageBitmap;
   return await fn(blob);
 }
@@ -213,8 +205,7 @@ export function initRenderAssets(): Promise<void> {
 
   assetsPromise = (async () => {
     try {
-      const [cloth, stitchSheet, stitchAlphaSheet] = await Promise.all([
-        loadBitmap(CLOTH_URL),
+      const [stitchSheet, stitchAlphaSheet] = await Promise.all([
         loadBitmap(STITCH_SHEET_URL),
         loadBitmap(STITCH_ALPHA_SHEET_URL),
       ]);
@@ -222,7 +213,6 @@ export function initRenderAssets(): Promise<void> {
       const { variantRects, alphaMasks } = buildVariantRectsAndMasks(stitchAlphaSheet);
 
       assets = {
-        cloth,
         stitchSheet,
         stitchAlphaSheet,
         variantRects,
@@ -271,7 +261,6 @@ function buildVariantRectsAndMasks(alphaSheet: ImageBitmap): {
     const img = sctx.getImageData(0, segTop, w, segH);
     const d = img.data;
 
-    // If alpha is opaque, treat brightness as alpha mask.
     let alphaVaries = false;
     for (let i = 3; i < d.length; i += 4) {
       if (d[i] !== 255) {
@@ -293,7 +282,6 @@ function buildVariantRectsAndMasks(alphaSheet: ImageBitmap): {
         const g = d[idx + 1];
         const b = d[idx + 2];
         const a = d[idx + 3];
-
         const mask = alphaVaries ? a : Math.max(r, g, b);
         if (mask > threshold) {
           if (x < minX) minX = x;
@@ -368,7 +356,6 @@ function makeAlphaMask(alphaSheet: ImageBitmap, rect: Rect): OffscreenCanvas | H
     const g = d[i + 1];
     const b = d[i + 2];
     const a = d[i + 3];
-
     const mask = alphaVaries ? a : Math.max(r, g, b);
 
     d[i + 0] = 255;
@@ -383,62 +370,42 @@ function makeAlphaMask(alphaSheet: ImageBitmap, rect: Rect): OffscreenCanvas | H
 
 // -----------------------------
 // Required export: drawFabricBackground
+// Now means: draw plain background and pattern backing
 // -----------------------------
 export function drawFabricBackground(rc: RenderContext): void {
-  const { ctx, canvasWidth, canvasHeight, viewport } = rc;
+  const { ctx, canvasWidth, canvasHeight } = rc;
 
-  if (!assets && !assetsFailed) ensureAssetsLoading();
-
-  // Fill outside-pattern area with plain base colour
-  ctx.fillStyle = FABRIC_COLOR;
+  // Outside-pattern area
+  ctx.fillStyle = CANVAS_BG_COLOR;
   ctx.fillRect(0, 0, canvasWidth, canvasHeight);
 
-  // If assets not ready, stop here (no wallpaper cloth)
-  if (!assets) return;
-
-  // Create base pattern per ctx
-  if (!clothPatternBase || clothPatternBaseCtx !== ctx) {
-    clothPatternBase = ctx.createPattern(assets.cloth as any, 'repeat');
-    clothPatternBaseCtx = ctx;
-  }
-  if (!clothPatternBase) return;
-
+  // Pattern backing (flat)
   const rect = getPatternScreenRect(rc);
   if (rect.w <= 0 || rect.h <= 0) return;
 
-  // Clip to pattern bounds so cloth exists only behind the pattern
   ctx.save();
-  ctx.beginPath();
-  ctx.rect(rect.x, rect.y, rect.w, rect.h);
-  ctx.clip();
+  ctx.fillStyle = PATTERN_BG_COLOR;
+  ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+  ctx.restore();
+}
 
-  // We want cloth to scale with zoom and move with pan.
-  // We achieve this by filling in a transformed coordinate space:
-  // - Translate to world origin in screen space
-  // - Scale so one cloth tile maps to one cell (or CLOTH_TILE_CELLS cells)
-  const origin = worldToScreen(0, 0, viewport);
+function drawPatternBorder(rc: RenderContext): void {
+  const { ctx } = rc;
+  const rect = getPatternScreenRect(rc);
+  if (rect.w <= 0 || rect.h <= 0) return;
 
-  const cellScreenSize = CELL_SIZE * viewport.scale;
-  const tileScreenSize = cellScreenSize * CLOTH_TILE_CELLS;
+  ctx.save();
+  ctx.strokeStyle = PATTERN_BORDER_COLOR;
+  ctx.lineWidth = PATTERN_BORDER_WIDTH_PX;
 
-  const imgW = assets.cloth.width || 1;
-  const scaleFactor = tileScreenSize / imgW;
-
-  // Fallback path that works even if CanvasPattern.setTransform is missing:
-  // transform the context, then fill using the pattern.
-  ctx.translate(origin.x, origin.y);
-  ctx.scale(scaleFactor, scaleFactor);
-
-  ctx.fillStyle = clothPatternBase;
-
-  // Fill the clipped screen rect, converted into transformed coords
-  const fx = (rect.x - origin.x) / scaleFactor;
-  const fy = (rect.y - origin.y) / scaleFactor;
-  const fw = rect.w / scaleFactor;
-  const fh = rect.h / scaleFactor;
-
-  ctx.fillRect(fx, fy, fw, fh);
-
+  // Crisp lines: align stroke to pixel grid
+  const half = PATTERN_BORDER_WIDTH_PX / 2;
+  ctx.strokeRect(
+    Math.round(rect.x) + half,
+    Math.round(rect.y) + half,
+    Math.round(rect.w) - PATTERN_BORDER_WIDTH_PX,
+    Math.round(rect.h) - PATTERN_BORDER_WIDTH_PX
+  );
   ctx.restore();
 }
 
@@ -605,46 +572,13 @@ export function drawThreadStrand(
 
   const { r, g, b } = hexToRgb(color);
 
-  const nx = -dy / len;
-  const ny = dx / len;
-
-  const midX = (x0 + x1) / 2;
-  const midY = (y0 + y1) / 2;
-
-  const gradOffset = thickness * 0.7;
-  const grad = ctx.createLinearGradient(
-    midX + nx * gradOffset,
-    midY + ny * gradOffset,
-    midX - nx * gradOffset,
-    midY - ny * gradOffset
-  );
-
-  const hiR = clamp(r + 48, 0, 255);
-  const hiG = clamp(g + 48, 0, 255);
-  const hiB = clamp(b + 48, 0, 255);
-
-  const loR = clamp(r - 44, 0, 255);
-  const loG = clamp(g - 44, 0, 255);
-  const loB = clamp(b - 44, 0, 255);
-
-  grad.addColorStop(0.0, `rgb(${hiR},${hiG},${hiB})`);
-  grad.addColorStop(0.35, color);
-  grad.addColorStop(0.65, color);
-  grad.addColorStop(1.0, `rgb(${loR},${loG},${loB})`);
-
   ctx.save();
-  ctx.strokeStyle = grad;
+  ctx.strokeStyle = `rgb(${r},${g},${b})`;
   ctx.lineWidth = thickness;
   ctx.lineCap = 'round';
-  ctx.lineJoin = 'round';
-
-  const tPad = Math.min(len * 0.12, thickness * 0.9);
-  const ux = dx / len;
-  const uy = dy / len;
-
   ctx.beginPath();
-  ctx.moveTo(x0 + ux * tPad, y0 + uy * tPad);
-  ctx.lineTo(x1 - ux * tPad, y1 - uy * tPad);
+  ctx.moveTo(x0, y0);
+  ctx.lineTo(x1, y1);
   ctx.stroke();
 
   const n = noiseTile(
@@ -726,9 +660,11 @@ export function drawRealisticStitch(
   ctx.shadowOffsetY = 0;
 
   const inset = clamp(cellScreenSize * 0.05, 0.8, 2.8);
+  const scale = 1.06; // 6% bigger
+  const base = cellScreenSize - inset * 2;
+  const ds = base * scale;
   const dx = screenX + inset + jx;
   const dy = screenY + inset + jy;
-  const ds = cellScreenSize - inset * 2;
 
   ctx.drawImage(stamp as any, dx, dy, ds, ds);
 
@@ -782,7 +718,7 @@ export function renderCanvas(rc: RenderContext): void {
 
   ctx.clearRect(0, 0, canvasWidth, canvasHeight);
 
-  // Cloth now only draws behind pattern bounds, scales with zoom, pans with viewport
+  // Flat background + pattern backing
   drawFabricBackground(rc);
 
   const bounds = getVisibleGridBounds(
@@ -795,6 +731,7 @@ export function renderCanvas(rc: RenderContext): void {
 
   const cellScreenSize = CELL_SIZE * viewport.scale;
 
+  // Grid inside the pattern only (optional but helpful)
   drawGridLines(rc, cellScreenSize);
 
   for (let row = bounds.minRow; row <= bounds.maxRow; row++) {
@@ -830,4 +767,7 @@ export function renderCanvas(rc: RenderContext): void {
       }
     }
   }
+
+  // Border on top so it is always visible
+  drawPatternBorder(rc);
 }
