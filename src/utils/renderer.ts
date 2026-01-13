@@ -2,30 +2,66 @@
 
 import type { PatternDoc, ViewportTransform } from '../types';
 import { NO_STITCH, StitchState } from '../types';
-import { hexToRgb, rgbToString } from './colors';
+import { hexToRgb } from './colors';
 import { CELL_SIZE, getVisibleGridBounds, worldToScreen } from './coordinates';
 import { getCellRandoms } from './random';
 
-// Fabric tuning
+/*
+  Sprite-based renderer
+
+  Assets expected under public/:
+    /assets/cloth/cloth-sprite.png
+    /assets/stitches/multiple-sprites-large.png
+    /assets/stitches/multiple-sprites-large-alpha-high.png
+
+  Key behaviour:
+  - Cloth is drawn in pattern space: it pans + zooms with viewport.
+  - Cloth is clipped to the pattern bounds only.
+  - Cloth tile size is tied to the cell size at current zoom so it matches stitches.
+  - Stitches are stamped from a sprite sheet, tinted to DMC colours, cached per size + colour + variant.
+*/
+
+// -----------------------------
+// Required exports (must remain)
+// -----------------------------
 export const FABRIC_COLOR = '#F5F0E8';
-export const FABRIC_WEAVE_DARK = 'rgba(0, 0, 0, 0.06)';
-export const FABRIC_WEAVE_LIGHT = 'rgba(255, 255, 255, 0.07)';
-export const FABRIC_GRID_LINE = 'rgba(0, 0, 0, 0.05)';
+
 export const FABRIC_HOLE_DARK = 'rgba(0, 0, 0, 0.14)';
 export const FABRIC_HOLE_LIGHT = 'rgba(255, 255, 255, 0.12)';
+export const FABRIC_WEAVE_DARK = 'rgba(0, 0, 0, 0.06)';
+export const FABRIC_WEAVE_LIGHT = 'rgba(255, 255, 255, 0.07)';
 
-// UI colours
-export const SYMBOL_COLOR = '#888888';
-export const SELECTED_COLOR_HIGHLIGHT = 'rgba(100, 149, 237, 0.3)';
+export const SYMBOL_COLOR = '#666666';
+export const SELECTED_COLOR_HIGHLIGHT = 'rgba(100, 149, 237, 0.28)';
 
-// Thread tuning (used)
-const THREAD_NOISE_ALPHA = 0.14;
-const THREAD_GROOVE_ALPHA = 0.16;
-const THREAD_TWIST_ALPHA = 0.26;
-const THREAD_EDGE_DARKEN = 0.16;
+// -----------------------------
+// Asset URLs (public/)
+// -----------------------------
+const CLOTH_URL = '/assets/cloth/cloth-sprite.png';
+const STITCH_SHEET_URL = '/assets/stitches/multiple-sprites-large.png';
+const STITCH_ALPHA_SHEET_URL = '/assets/stitches/multiple-sprites-large-alpha-high.png';
 
-const NOISE_TILE_SIZE = 48;
+// -----------------------------
+// Tunables
+// -----------------------------
+export const FABRIC_GRID_LINE = 'rgba(0, 0, 0, 0.05)';
 
+// Cloth tiling: how many cells wide is one cloth texture repeat
+// 1 means "one cloth tile per cell" (matches stitch dimensions).
+// 2 means "one cloth tile spans 2 cells" (coarser fabric).
+const CLOTH_TILE_CELLS = 2;
+
+const STITCH_SHADOW_ALPHA = 0.1;
+const STITCH_HIGHLIGHT_PASS_ALPHA = 0.22;
+const STITCH_NOISE_ALPHA = 0.08;
+const STITCH_CONTRAST_LIFT_ALPHA = 0.1;
+
+const MAX_STAMP_CACHE = 1200;
+const VARIANTS = 3;
+
+// -----------------------------
+// Types
+// -----------------------------
 export interface RenderContext {
   ctx: CanvasRenderingContext2D;
   pattern: PatternDoc;
@@ -37,30 +73,52 @@ export interface RenderContext {
   canvasHeight: number;
 }
 
+type Rect = { sx: number; sy: number; sw: number; sh: number };
+
+type LoadedAssets = {
+  cloth: ImageBitmap;
+  stitchSheet: ImageBitmap;
+  stitchAlphaSheet: ImageBitmap;
+  variantRects: Rect[];
+  alphaMasks: Array<OffscreenCanvas | HTMLCanvasElement>;
+};
+
+// -----------------------------
+// Module state
+// -----------------------------
+let assets: LoadedAssets | null = null;
+let assetsPromise: Promise<void> | null = null;
+let assetsFailed = false;
+
+// Cloth pattern is context-sensitive and scale/pan-dependent, so we build it per ctx
+let clothPatternBase: CanvasPattern | null = null;
+let clothPatternBaseCtx: CanvasRenderingContext2D | null = null;
+
+const stampCache = new Map<string, OffscreenCanvas | HTMLCanvasElement>();
+const noiseCache = new Map<string, OffscreenCanvas | HTMLCanvasElement>();
+
+// -----------------------------
+// Utilities
+// -----------------------------
 function clamp(v: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, v));
 }
 
-function smoothstep(edge0: number, edge1: number, x: number): number {
-  const t = clamp((x - edge0) / (edge1 - edge0), 0, 1);
-  return t * t * (3 - 2 * t);
+function quantiseSize(px: number): number {
+  if (px < 18) return 18;
+  if (px < 24) return 24;
+  if (px < 32) return 32;
+  if (px < 48) return 48;
+  if (px < 64) return 64;
+  if (px < 96) return 96;
+  return 128;
 }
 
-// 0 at ends, 1 in the middle
-function taper01(t: number): number {
-  const a = smoothstep(0.0, 0.16, t);
-  const b = 1.0 - smoothstep(0.84, 1.0, t);
-  return Math.min(a, b);
-}
-
-function mulberry32(seed: number): () => number {
-  let t = seed >>> 0;
-  return () => {
-    t += 0x6d2b79f5;
-    let x = Math.imul(t ^ (t >>> 15), 1 | t);
-    x ^= x + Math.imul(x ^ (x >>> 7), 61 | x);
-    return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
-  };
+function hash2(a: number, b: number): number {
+  let x = (a * 73856093) ^ (b * 19349663);
+  x = (x ^ (x >>> 13)) >>> 0;
+  x = Math.imul(x, 1274126177) >>> 0;
+  return (x ^ (x >>> 16)) >>> 0;
 }
 
 export function createOffscreenCanvas(
@@ -76,17 +134,20 @@ export function createOffscreenCanvas(
   return canvas;
 }
 
-// ---- Noise tiles (cached) ----
+function evictIfNeeded(): void {
+  if (stampCache.size <= MAX_STAMP_CACHE) return;
+  const toRemove = stampCache.size - MAX_STAMP_CACHE;
+  const it = stampCache.keys();
+  for (let i = 0; i < toRemove; i++) {
+    const k = it.next().value as string | undefined;
+    if (!k) break;
+    stampCache.delete(k);
+  }
+}
 
-const noiseTileCache = new Map<string, HTMLCanvasElement | OffscreenCanvas>();
-
-function getNoiseTile(
-  size: number,
-  alpha: number,
-  seed: number
-): HTMLCanvasElement | OffscreenCanvas {
+function noiseTile(size: number, alpha: number, seed: number): OffscreenCanvas | HTMLCanvasElement {
   const key = `${size}|${alpha}|${seed}`;
-  const cached = noiseTileCache.get(key);
+  const cached = noiseCache.get(key);
   if (cached) return cached;
 
   const c = createOffscreenCanvas(size, size);
@@ -96,13 +157,14 @@ function getNoiseTile(
     | null;
   if (!nctx) return c;
 
-  const rng = mulberry32(seed);
+  let s = seed >>> 0;
   const img = nctx.createImageData(size, size);
   const d = img.data;
   const a = Math.floor(clamp(alpha, 0, 1) * 255);
 
   for (let i = 0; i < d.length; i += 4) {
-    const v = Math.floor(rng() * 255);
+    s = (Math.imul(1664525, s) + 1013904223) >>> 0;
+    const v = (s >>> 24) & 255;
     d[i + 0] = v;
     d[i + 1] = v;
     d[i + 2] = v;
@@ -110,255 +172,314 @@ function getNoiseTile(
   }
 
   nctx.putImageData(img, 0, 0);
-  noiseTileCache.set(key, c);
+  noiseCache.set(key, c);
   return c;
 }
 
-// ---- Fabric pattern (cached) ----
+function getPatternScreenRect(rc: RenderContext): { x: number; y: number; w: number; h: number } {
+  const { pattern, viewport } = rc;
 
-const fabricPatternCache = new Map<string, CanvasPattern>();
+  const tl = worldToScreen(0, 0, viewport);
+  const br = worldToScreen(pattern.width * CELL_SIZE, pattern.height * CELL_SIZE, viewport);
 
-// ---- Stitch LRU cache ----
-
-interface CachedStitch {
-  canvas: HTMLCanvasElement | OffscreenCanvas;
-  lastUsed: number;
+  const x = Math.min(tl.x, br.x);
+  const y = Math.min(tl.y, br.y);
+  const w = Math.abs(br.x - tl.x);
+  const h = Math.abs(br.y - tl.y);
+  return { x, y, w, h };
 }
 
-const stitchCache = new Map<string, CachedStitch>();
-const MAX_STITCH_CACHE_SIZE = 1000; // Limit cache size
-let cacheAccessCounter = 0;
+// -----------------------------
+// Asset loading
+// -----------------------------
+async function loadBitmap(url: string): Promise<ImageBitmap> {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Failed to load ${url}: ${res.status}`);
+  const blob = await res.blob();
 
-function getStitchCacheKey(color: string, cellScreenSize: number, col: number, row: number): string {
-  // Round cellScreenSize to nearest 4px to increase cache hits
-  const roundedSize = Math.round(cellScreenSize / 4) * 4;
-  return `${color}|${roundedSize}|${col}|${row}`;
+  const fn = globalThis.createImageBitmap;
+  return await fn(blob);
 }
 
-function getCachedStitch(
-  color: string,
-  cellScreenSize: number,
-  col: number,
-  row: number
-): HTMLCanvasElement | OffscreenCanvas | null {
-  const key = getStitchCacheKey(color, cellScreenSize, col, row);
-  const cached = stitchCache.get(key);
-
-  if (cached) {
-    cached.lastUsed = ++cacheAccessCounter;
-    return cached.canvas;
-  }
-
-  return null;
+function ensureAssetsLoading(): void {
+  if (assets || assetsPromise || assetsFailed) return;
+  void initRenderAssets();
 }
 
-function cacheStitch(
-  color: string,
-  cellScreenSize: number,
-  col: number,
-  row: number,
-  canvas: HTMLCanvasElement | OffscreenCanvas
-): void {
-  // Evict oldest entries if cache is full
-  if (stitchCache.size >= MAX_STITCH_CACHE_SIZE) {
-    let oldestKey: string | null = null;
-    let oldestTime = Infinity;
+// Optional: call once at app start. Also auto-starts on first render if not called.
+export function initRenderAssets(): Promise<void> {
+  if (assets) return Promise.resolve();
+  if (assetsPromise) return assetsPromise;
 
-    for (const [key, entry] of stitchCache.entries()) {
-      if (entry.lastUsed < oldestTime) {
-        oldestTime = entry.lastUsed;
-        oldestKey = key;
-      }
+  assetsPromise = (async () => {
+    try {
+      const [cloth, stitchSheet, stitchAlphaSheet] = await Promise.all([
+        loadBitmap(CLOTH_URL),
+        loadBitmap(STITCH_SHEET_URL),
+        loadBitmap(STITCH_ALPHA_SHEET_URL),
+      ]);
+
+      const { variantRects, alphaMasks } = buildVariantRectsAndMasks(stitchAlphaSheet);
+
+      assets = {
+        cloth,
+        stitchSheet,
+        stitchAlphaSheet,
+        variantRects,
+        alphaMasks,
+      };
+    } catch {
+      assetsFailed = true;
     }
+  })();
 
-    if (oldestKey) {
-      stitchCache.delete(oldestKey);
-    }
-  }
-
-  const key = getStitchCacheKey(color, cellScreenSize, col, row);
-  stitchCache.set(key, {
-    canvas,
-    lastUsed: ++cacheAccessCounter,
-  });
+  return assetsPromise;
 }
 
-function getFabricPattern(
-  ctx: CanvasRenderingContext2D,
-  cellScreenSize: number
-): CanvasPattern | null {
-  const q = Math.max(6, Math.min(64, Math.round(cellScreenSize)));
-  const key = `fabric|${q}`;
-  const cached = fabricPatternCache.get(key);
-  if (cached) return cached;
+function buildVariantRectsAndMasks(alphaSheet: ImageBitmap): {
+  variantRects: Rect[];
+  alphaMasks: Array<OffscreenCanvas | HTMLCanvasElement>;
+} {
+  const w = alphaSheet.width;
+  const h = alphaSheet.height;
+  const segH = Math.floor(h / VARIANTS);
 
-  const tileSize = clamp(Math.round(q * 2.2), 24, 128);
-  const weaveStep = clamp(Math.round(q * 0.18), 3, 10);
-
-  const canvas = createOffscreenCanvas(tileSize, tileSize);
-  const c2d = canvas.getContext('2d') as
+  const sheetCanvas = createOffscreenCanvas(w, h);
+  const sctx = sheetCanvas.getContext('2d') as
     | CanvasRenderingContext2D
     | OffscreenCanvasRenderingContext2D
     | null;
-  if (!c2d) return null;
 
-  c2d.fillStyle = FABRIC_COLOR;
-  c2d.fillRect(0, 0, tileSize, tileSize);
+  const rects: Rect[] = [];
+  const masks: Array<OffscreenCanvas | HTMLCanvasElement> = [];
 
-  // Subtle noise to avoid banding/posterisation
-  {
-    const noise = getNoiseTile(64, 0.08, 1337);
-    c2d.save();
-    c2d.globalCompositeOperation = 'soft-light';
-    c2d.drawImage(noise as any, 0, 0, tileSize, tileSize);
-    c2d.restore();
-  }
-
-  // Horizontal weave
-  c2d.save();
-  for (let y = 0; y < tileSize + weaveStep; y += weaveStep) {
-    const w = 1 + ((y / weaveStep) % 3);
-    c2d.fillStyle = (y / weaveStep) % 2 === 0 ? FABRIC_WEAVE_DARK : FABRIC_WEAVE_LIGHT;
-    c2d.fillRect(0, y, tileSize, w);
-  }
-  c2d.restore();
-
-  // Vertical weave (multiply to look like crossing threads)
-  c2d.save();
-  c2d.globalCompositeOperation = 'multiply';
-  for (let x = 0; x < tileSize + weaveStep; x += weaveStep) {
-    const w = 1 + ((x / weaveStep) % 3);
-    c2d.fillStyle = 'rgba(0, 0, 0, 0.045)';
-    c2d.fillRect(x, 0, w, tileSize);
-  }
-  c2d.restore();
-
-  // Weave holes at intersections
-  const holeR = clamp(q * 0.04, 0.7, 2.2);
-  c2d.save();
-  for (let y = 0; y < tileSize + weaveStep; y += weaveStep) {
-    for (let x = 0; x < tileSize + weaveStep; x += weaveStep) {
-      const gx = x + 0.5;
-      const gy = y + 0.5;
-
-      const grad = c2d.createRadialGradient(gx, gy, 0, gx, gy, holeR * 2.2);
-      grad.addColorStop(0, FABRIC_HOLE_DARK);
-      grad.addColorStop(0.6, 'rgba(0,0,0,0.05)');
-      grad.addColorStop(1, 'rgba(0,0,0,0)');
-
-      c2d.fillStyle = grad;
-      c2d.beginPath();
-      c2d.arc(gx, gy, holeR * 2.2, 0, Math.PI * 2);
-      c2d.fill();
-
-      c2d.fillStyle = FABRIC_HOLE_LIGHT;
-      c2d.beginPath();
-      c2d.arc(gx - holeR * 0.35, gy - holeR * 0.35, holeR * 0.65, 0, Math.PI * 2);
-      c2d.fill();
+  if (!sctx) {
+    for (let v = 0; v < VARIANTS; v++) {
+      const side = Math.min(w, segH);
+      const rect = { sx: 0, sy: v * segH, sw: side, sh: side };
+      rects.push(rect);
+      masks.push(makeAlphaMask(alphaSheet, rect));
     }
+    return { variantRects: rects, alphaMasks: masks };
   }
-  c2d.restore();
 
-  const pattern = ctx.createPattern(canvas as any, 'repeat');
-  if (!pattern) return null;
+  sctx.clearRect(0, 0, w, h);
+  sctx.drawImage(alphaSheet as any, 0, 0);
 
-  fabricPatternCache.set(key, pattern);
-  return pattern;
+  for (let v = 0; v < VARIANTS; v++) {
+    const segTop = v * segH;
+    const img = sctx.getImageData(0, segTop, w, segH);
+    const d = img.data;
+
+    // If alpha is opaque, treat brightness as alpha mask.
+    let alphaVaries = false;
+    for (let i = 3; i < d.length; i += 4) {
+      if (d[i] !== 255) {
+        alphaVaries = true;
+        break;
+      }
+    }
+
+    const threshold = 20;
+    let minX = w,
+      minY = segH,
+      maxX = -1,
+      maxY = -1;
+
+    for (let y = 0; y < segH; y++) {
+      for (let x = 0; x < w; x++) {
+        const idx = (y * w + x) * 4;
+        const r = d[idx + 0];
+        const g = d[idx + 1];
+        const b = d[idx + 2];
+        const a = d[idx + 3];
+
+        const mask = alphaVaries ? a : Math.max(r, g, b);
+        if (mask > threshold) {
+          if (x < minX) minX = x;
+          if (y < minY) minY = y;
+          if (x > maxX) maxX = x;
+          if (y > maxY) maxY = y;
+        }
+      }
+    }
+
+    if (maxX < 0 || maxY < 0) {
+      const side = Math.min(w, segH);
+      const sx = Math.floor((w - side) / 2);
+      const sy = segTop + Math.floor((segH - side) / 2);
+      const rect = { sx, sy, sw: side, sh: side };
+      rects.push(rect);
+      masks.push(makeAlphaMask(alphaSheet, rect));
+      continue;
+    }
+
+    const pad = 2;
+    minX = clamp(minX - pad, 0, w - 1);
+    minY = clamp(minY - pad, 0, segH - 1);
+    maxX = clamp(maxX + pad, 0, w - 1);
+    maxY = clamp(maxY + pad, 0, segH - 1);
+
+    const bbW = maxX - minX + 1;
+    const bbH = maxY - minY + 1;
+    const side = Math.min(w, segH, Math.max(bbW, bbH));
+
+    const cx = minX + bbW / 2;
+    const cy = minY + bbH / 2;
+
+    let sx = Math.floor(cx - side / 2);
+    let syLocal = Math.floor(cy - side / 2);
+
+    sx = clamp(sx, 0, w - side);
+    syLocal = clamp(syLocal, 0, segH - side);
+
+    const rect = { sx, sy: segTop + syLocal, sw: side, sh: side };
+    rects.push(rect);
+    masks.push(makeAlphaMask(alphaSheet, rect));
+  }
+
+  return { variantRects: rects, alphaMasks: masks };
 }
 
-// Cover the stitch ends so they look like they disappear into the cloth.
-function drawHoleOverlay(
-  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
-  x: number,
-  y: number,
-  r: number,
-  fabricHex: string
-): void {
-  const { r: fr, g: fg, b: fb } = hexToRgb(fabricHex);
+function makeAlphaMask(alphaSheet: ImageBitmap, rect: Rect): OffscreenCanvas | HTMLCanvasElement {
+  const c = createOffscreenCanvas(rect.sw, rect.sh);
+  const cctx = c.getContext('2d') as
+    | CanvasRenderingContext2D
+    | OffscreenCanvasRenderingContext2D
+    | null;
+  if (!cctx) return c;
 
+  cctx.clearRect(0, 0, rect.sw, rect.sh);
+  cctx.drawImage(alphaSheet as any, rect.sx, rect.sy, rect.sw, rect.sh, 0, 0, rect.sw, rect.sh);
+
+  const img = cctx.getImageData(0, 0, rect.sw, rect.sh);
+  const d = img.data;
+
+  let alphaVaries = false;
+  for (let i = 3; i < d.length; i += 4) {
+    if (d[i] !== 255) {
+      alphaVaries = true;
+      break;
+    }
+  }
+
+  for (let i = 0; i < d.length; i += 4) {
+    const r = d[i + 0];
+    const g = d[i + 1];
+    const b = d[i + 2];
+    const a = d[i + 3];
+
+    const mask = alphaVaries ? a : Math.max(r, g, b);
+
+    d[i + 0] = 255;
+    d[i + 1] = 255;
+    d[i + 2] = 255;
+    d[i + 3] = mask;
+  }
+
+  cctx.putImageData(img, 0, 0);
+  return c;
+}
+
+// -----------------------------
+// Required export: drawFabricBackground
+// -----------------------------
+export function drawFabricBackground(rc: RenderContext): void {
+  const { ctx, canvasWidth, canvasHeight, viewport } = rc;
+
+  if (!assets && !assetsFailed) ensureAssetsLoading();
+
+  // Fill outside-pattern area with plain base colour
+  ctx.fillStyle = FABRIC_COLOR;
+  ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+
+  // If assets not ready, stop here (no wallpaper cloth)
+  if (!assets) return;
+
+  // Create base pattern per ctx
+  if (!clothPatternBase || clothPatternBaseCtx !== ctx) {
+    clothPatternBase = ctx.createPattern(assets.cloth as any, 'repeat');
+    clothPatternBaseCtx = ctx;
+  }
+  if (!clothPatternBase) return;
+
+  const rect = getPatternScreenRect(rc);
+  if (rect.w <= 0 || rect.h <= 0) return;
+
+  // Clip to pattern bounds so cloth exists only behind the pattern
   ctx.save();
-
-  ctx.fillStyle = rgbToString(fr, fg, fb, 0.92);
   ctx.beginPath();
-  ctx.arc(x, y, r * 0.72, 0, Math.PI * 2);
-  ctx.fill();
+  ctx.rect(rect.x, rect.y, rect.w, rect.h);
+  ctx.clip();
 
-  const g1 = ctx.createRadialGradient(x, y, 0, x, y, r * 1.9);
-  g1.addColorStop(0, 'rgba(0, 0, 0, 0.22)');
-  g1.addColorStop(0.5, 'rgba(0, 0, 0, 0.10)');
-  g1.addColorStop(1, 'rgba(0, 0, 0, 0)');
+  // We want cloth to scale with zoom and move with pan.
+  // We achieve this by filling in a transformed coordinate space:
+  // - Translate to world origin in screen space
+  // - Scale so one cloth tile maps to one cell (or CLOTH_TILE_CELLS cells)
+  const origin = worldToScreen(0, 0, viewport);
 
-  ctx.fillStyle = g1;
-  ctx.beginPath();
-  ctx.arc(x, y, r * 1.9, 0, Math.PI * 2);
-  ctx.fill();
+  const cellScreenSize = CELL_SIZE * viewport.scale;
+  const tileScreenSize = cellScreenSize * CLOTH_TILE_CELLS;
 
-  const hx = x - r * 0.35;
-  const hy = y - r * 0.35;
-  const g2 = ctx.createRadialGradient(hx, hy, 0, hx, hy, r * 1.1);
-  g2.addColorStop(0, 'rgba(255, 255, 255, 0.18)');
-  g2.addColorStop(1, 'rgba(255, 255, 255, 0)');
+  const imgW = assets.cloth.width || 1;
+  const scaleFactor = tileScreenSize / imgW;
 
-  ctx.fillStyle = g2;
-  ctx.beginPath();
-  ctx.arc(hx, hy, r * 1.1, 0, Math.PI * 2);
-  ctx.fill();
+  // Fallback path that works even if CanvasPattern.setTransform is missing:
+  // transform the context, then fill using the pattern.
+  ctx.translate(origin.x, origin.y);
+  ctx.scale(scaleFactor, scaleFactor);
+
+  ctx.fillStyle = clothPatternBase;
+
+  // Fill the clipped screen rect, converted into transformed coords
+  const fx = (rect.x - origin.x) / scaleFactor;
+  const fy = (rect.y - origin.y) / scaleFactor;
+  const fw = rect.w / scaleFactor;
+  const fh = rect.h / scaleFactor;
+
+  ctx.fillRect(fx, fy, fw, fh);
 
   ctx.restore();
 }
 
-export function drawFabricBackground(rc: RenderContext): void {
+function drawGridLines(rc: RenderContext, cellScreenSize: number): void {
   const { ctx, canvasWidth, canvasHeight, viewport, pattern } = rc;
+  if (cellScreenSize < 12) return;
 
-  const cellScreenSize = CELL_SIZE * viewport.scale;
+  const bounds = getVisibleGridBounds(
+    canvasWidth,
+    canvasHeight,
+    viewport,
+    pattern.width,
+    pattern.height
+  );
 
-  ctx.fillStyle = FABRIC_COLOR;
-  ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+  ctx.save();
+  ctx.strokeStyle = FABRIC_GRID_LINE;
+  ctx.lineWidth = 1;
 
-  if (cellScreenSize < 7) return;
-
-  const fabricPat = getFabricPattern(ctx, cellScreenSize);
-  if (fabricPat) {
-    ctx.save();
-    ctx.fillStyle = fabricPat;
-    ctx.fillRect(0, 0, canvasWidth, canvasHeight);
-    ctx.restore();
+  for (let col = bounds.minCol; col <= bounds.maxCol + 1; col++) {
+    const x = worldToScreen(col * CELL_SIZE, 0, viewport).x;
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, canvasHeight);
+    ctx.stroke();
   }
 
-  // Faint grid lines
-  if (cellScreenSize >= 10) {
-    const bounds = getVisibleGridBounds(
-      canvasWidth,
-      canvasHeight,
-      viewport,
-      pattern.width,
-      pattern.height
-    );
-
-    ctx.save();
-    ctx.strokeStyle = FABRIC_GRID_LINE;
-    ctx.lineWidth = 1;
-
-    for (let col = bounds.minCol; col <= bounds.maxCol + 1; col++) {
-      const x = worldToScreen(col * CELL_SIZE, 0, viewport).x;
-      ctx.beginPath();
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x, canvasHeight);
-      ctx.stroke();
-    }
-
-    for (let row = bounds.minRow; row <= bounds.maxRow + 1; row++) {
-      const y = worldToScreen(0, row * CELL_SIZE, viewport).y;
-      ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(canvasWidth, y);
-      ctx.stroke();
-    }
-
-    ctx.restore();
+  for (let row = bounds.minRow; row <= bounds.maxRow + 1; row++) {
+    const y = worldToScreen(0, row * CELL_SIZE, viewport).y;
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(canvasWidth, y);
+    ctx.stroke();
   }
+
+  ctx.restore();
 }
 
+// -----------------------------
+// Required export: drawSymbol
+// -----------------------------
 export function drawSymbol(
   ctx: CanvasRenderingContext2D,
   symbol: string,
@@ -366,7 +487,7 @@ export function drawSymbol(
   screenY: number,
   cellScreenSize: number
 ): void {
-  const fontSize = Math.max(8, Math.min(cellScreenSize * 0.5, 20));
+  const fontSize = Math.max(8, Math.min(cellScreenSize * 0.48, 20));
   ctx.font = `bold ${fontSize}px monospace`;
   ctx.fillStyle = SYMBOL_COLOR;
   ctx.textAlign = 'center';
@@ -374,9 +495,86 @@ export function drawSymbol(
   ctx.fillText(symbol, screenX + cellScreenSize / 2, screenY + cellScreenSize / 2);
 }
 
-// Tapered, textured ribbon strand that fades into holes.
+// -----------------------------
+// Sprite stamp generation
+// -----------------------------
+function makeTintedStamp(
+  hex: string,
+  size: number,
+  variant: number,
+  flipX: boolean,
+  flipY: boolean
+): OffscreenCanvas | HTMLCanvasElement {
+  const key = `stamp|${hex}|${size}|v${variant}|fx${flipX ? 1 : 0}|fy${flipY ? 1 : 0}`;
+  const cached = stampCache.get(key);
+  if (cached) return cached;
+
+  const c = createOffscreenCanvas(size, size);
+  const sctx = c.getContext('2d') as
+    | CanvasRenderingContext2D
+    | OffscreenCanvasRenderingContext2D
+    | null;
+  if (!sctx || !assets) return c;
+
+  const v = clamp(variant, 0, VARIANTS - 1);
+  const rect = assets.variantRects[v];
+  const alphaMask = assets.alphaMasks[v];
+
+  sctx.clearRect(0, 0, size, size);
+  sctx.imageSmoothingEnabled = true;
+
+  sctx.save();
+  if (flipX || flipY) {
+    sctx.translate(flipX ? size : 0, flipY ? size : 0);
+    sctx.scale(flipX ? -1 : 1, flipY ? -1 : 1);
+  }
+
+  // Base colour
+  sctx.globalCompositeOperation = 'source-over';
+  sctx.fillStyle = hex;
+  sctx.fillRect(0, 0, size, size);
+
+  // Multiply shading
+  sctx.globalCompositeOperation = 'multiply';
+  sctx.drawImage(assets.stitchSheet as any, rect.sx, rect.sy, rect.sw, rect.sh, 0, 0, size, size);
+
+  // Lift crushed blacks slightly
+  sctx.globalCompositeOperation = 'screen';
+  sctx.globalAlpha = STITCH_CONTRAST_LIFT_ALPHA;
+  sctx.fillStyle = '#3a3a3a';
+  sctx.fillRect(0, 0, size, size);
+
+  // Restore highlights
+  sctx.globalAlpha = STITCH_HIGHLIGHT_PASS_ALPHA;
+  sctx.drawImage(assets.stitchSheet as any, rect.sx, rect.sy, rect.sw, rect.sh, 0, 0, size, size);
+  sctx.globalAlpha = 1;
+
+  // Dither/noise
+  sctx.globalCompositeOperation = 'soft-light';
+  const n = noiseTile(
+    48,
+    STITCH_NOISE_ALPHA,
+    hash2(size, v) ^ hash2(hex.length, hex.charCodeAt(1) || 0)
+  );
+  sctx.drawImage(n as any, 0, 0, size, size);
+
+  // Apply alpha mask last
+  sctx.globalCompositeOperation = 'destination-in';
+  sctx.drawImage(alphaMask as any, 0, 0, size, size);
+
+  sctx.restore();
+
+  stampCache.set(key, c);
+  evictIfNeeded();
+  return c;
+}
+
+// -----------------------------
+// Required export: drawThreadStrand
+// Sprite system draws full stitches, but keep this for API compatibility.
+// -----------------------------
 export function drawThreadStrand(
-  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+  ctx: CanvasRenderingContext2D,
   x0: number,
   y0: number,
   x1: number,
@@ -391,23 +589,12 @@ export function drawThreadStrand(
   const len = Math.hypot(dx, dy);
   if (len < 0.001) return;
 
-  const { r, g, b } = hexToRgb(color);
-
-  const seed =
-    ((Math.floor(variationSeed * 1_000_000) ^ (isTopStrand ? 0xa5a5a5a5 : 0x5a5a5a5a)) >>> 0) ^
-    (Math.floor(thickness * 1000) * 2654435761);
-  const rng = mulberry32(seed >>> 0);
-
-  const angle = Math.atan2(dy, dx);
-  const half = thickness / 2;
-
-  // Depth shadow: stronger on bottom strand
   if (!isTopStrand) {
     ctx.save();
-    ctx.shadowColor = 'rgba(0, 0, 0, 0.22)';
-    ctx.shadowBlur = thickness * 0.75;
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.18)';
+    ctx.shadowBlur = thickness * 0.6;
     ctx.strokeStyle = 'rgba(0, 0, 0, 0.06)';
-    ctx.lineWidth = thickness * 1.08;
+    ctx.lineWidth = thickness * 1.05;
     ctx.lineCap = 'round';
     ctx.beginPath();
     ctx.moveTo(x0, y0);
@@ -416,210 +603,91 @@ export function drawThreadStrand(
     ctx.restore();
   }
 
+  const { r, g, b } = hexToRgb(color);
+
+  const nx = -dy / len;
+  const ny = dx / len;
+
+  const midX = (x0 + x1) / 2;
+  const midY = (y0 + y1) / 2;
+
+  const gradOffset = thickness * 0.7;
+  const grad = ctx.createLinearGradient(
+    midX + nx * gradOffset,
+    midY + ny * gradOffset,
+    midX - nx * gradOffset,
+    midY - ny * gradOffset
+  );
+
+  const hiR = clamp(r + 48, 0, 255);
+  const hiG = clamp(g + 48, 0, 255);
+  const hiB = clamp(b + 48, 0, 255);
+
+  const loR = clamp(r - 44, 0, 255);
+  const loG = clamp(g - 44, 0, 255);
+  const loB = clamp(b - 44, 0, 255);
+
+  grad.addColorStop(0.0, `rgb(${hiR},${hiG},${hiB})`);
+  grad.addColorStop(0.35, color);
+  grad.addColorStop(0.65, color);
+  grad.addColorStop(1.0, `rgb(${loR},${loG},${loB})`);
+
   ctx.save();
-  ctx.translate(x0, y0);
-  ctx.rotate(angle);
-
-  // Gentle centreline bend, endpoints fixed
-  const bend = (rng() * 2 - 1) * thickness * (isTopStrand ? 0.06 : 0.09);
-
-  // Ribbon polygon (tapered)
-  const segments = clamp(Math.floor(len / 6), 12, 26);
-  const top: Array<[number, number]> = [];
-  const bot: Array<[number, number]> = [];
-
-  for (let i = 0; i <= segments; i++) {
-    const t = i / segments;
-    const x = len * t;
-
-    const tt = taper01(t);
-    const widthFactor = 0.16 + 0.84 * tt;
-
-    const jitter = 0.96 + (rng() - 0.5) * 0.06;
-    const w = half * widthFactor * jitter;
-
-    const cy = bend * Math.sin(Math.PI * t) * (0.25 + 0.75 * tt);
-
-    top.push([x, cy - w]);
-    bot.push([x, cy + w]);
-  }
-
-  ctx.beginPath();
-  ctx.moveTo(top[0][0], top[0][1]);
-  for (let i = 1; i < top.length; i++) ctx.lineTo(top[i][0], top[i][1]);
-  for (let i = bot.length - 1; i >= 0; i--) ctx.lineTo(bot[i][0], bot[i][1]);
-  ctx.closePath();
-  ctx.clip();
-
-  // Base cross-section shading (more stops, less banding)
-  const maxHalf = half;
-  const grad = ctx.createLinearGradient(0, -maxHalf, 0, maxHalf);
-
-  const hiR = clamp(r + 52 + (rng() - 0.5) * 10, 0, 255);
-  const hiG = clamp(g + 52 + (rng() - 0.5) * 10, 0, 255);
-  const hiB = clamp(b + 52 + (rng() - 0.5) * 10, 0, 255);
-
-  const mhR = clamp(r + 26 + (rng() - 0.5) * 8, 0, 255);
-  const mhG = clamp(g + 26 + (rng() - 0.5) * 8, 0, 255);
-  const mhB = clamp(b + 26 + (rng() - 0.5) * 8, 0, 255);
-
-  const mlR = clamp(r - 18 + (rng() - 0.5) * 8, 0, 255);
-  const mlG = clamp(g - 18 + (rng() - 0.5) * 8, 0, 255);
-  const mlB = clamp(b - 18 + (rng() - 0.5) * 8, 0, 255);
-
-  const loR = clamp(r - 46 + (rng() - 0.5) * 10, 0, 255);
-  const loG = clamp(g - 46 + (rng() - 0.5) * 10, 0, 255);
-  const loB = clamp(b - 46 + (rng() - 0.5) * 10, 0, 255);
-
-  grad.addColorStop(0.0, rgbToString(hiR, hiG, hiB));
-  grad.addColorStop(0.18, rgbToString(mhR, mhG, mhB));
-  grad.addColorStop(0.42, color);
-  grad.addColorStop(0.58, color);
-  grad.addColorStop(0.82, rgbToString(mlR, mlG, mlB));
-  grad.addColorStop(1.0, rgbToString(loR, loG, loB));
-
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, -maxHalf - 2, len, thickness + 4);
-
-  // Edge darkening (rounded cross-section feel)
-  ctx.save();
-  ctx.globalCompositeOperation = 'multiply';
-  ctx.strokeStyle = `rgba(0,0,0,${THREAD_EDGE_DARKEN})`;
+  ctx.strokeStyle = grad;
+  ctx.lineWidth = thickness;
   ctx.lineCap = 'round';
-  ctx.lineWidth = clamp(thickness * 0.1, 0.7, 2.0);
+  ctx.lineJoin = 'round';
+
+  const tPad = Math.min(len * 0.12, thickness * 0.9);
+  const ux = dx / len;
+  const uy = dy / len;
 
   ctx.beginPath();
-  ctx.moveTo(0, -maxHalf * 0.92);
-  ctx.lineTo(len, -maxHalf * 0.92);
+  ctx.moveTo(x0 + ux * tPad, y0 + uy * tPad);
+  ctx.lineTo(x1 - ux * tPad, y1 - uy * tPad);
   ctx.stroke();
 
-  ctx.beginPath();
-  ctx.moveTo(0, maxHalf * 0.92);
-  ctx.lineTo(len, maxHalf * 0.92);
-  ctx.stroke();
-  ctx.restore();
-
-  // Fibre noise to kill "plastic poster"
-  {
-    const noise = getNoiseTile(NOISE_TILE_SIZE, THREAD_NOISE_ALPHA, seed ^ 0x12345678);
-    ctx.save();
-    ctx.globalCompositeOperation = 'soft-light';
-    ctx.drawImage(noise as any, 0, -maxHalf, len, thickness);
-    ctx.restore();
-  }
-
-  // Grooves (subtle)
-  {
-    ctx.save();
-    ctx.globalCompositeOperation = 'multiply';
-    ctx.strokeStyle = `rgba(0,0,0,${THREAD_GROOVE_ALPHA})`;
-    ctx.lineCap = 'round';
-
-    const grooves = clamp(Math.floor(thickness * 1.2), 6, 18);
-    const step = clamp(thickness * 0.55, 2, 6);
-
-    for (let i = 0; i < grooves; i++) {
-      const baseY = (rng() * 2 - 1) * maxHalf * 0.78;
-      const w = clamp(thickness * (0.035 + rng() * 0.02), 0.4, 1.2);
-      ctx.lineWidth = w;
-
-      ctx.beginPath();
-      for (let x = 0; x <= len; x += step) {
-        const y = baseY + Math.sin(x / (thickness * 1.2) + rng() * 2) * (thickness * 0.03);
-        if (x === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
-      }
-      ctx.stroke();
-    }
-
-    ctx.restore();
-  }
-
-  // Twist highlight
-  {
-    ctx.save();
-    ctx.globalCompositeOperation = 'screen';
-    ctx.strokeStyle = `rgba(255,255,255,${THREAD_TWIST_ALPHA})`;
-    ctx.lineWidth = clamp(thickness * 0.24, 0.8, thickness * 0.34);
-    ctx.lineCap = 'round';
-
-    const step = clamp(thickness * 0.55, 2, 6);
-
-    ctx.beginPath();
-    for (let x = 0; x <= len; x += step) {
-      const t = x / Math.max(1, len);
-      const phase = t * Math.PI * 2 * 1.05 + variationSeed * Math.PI * 2;
-      const y = -maxHalf * 0.18 + Math.sin(phase) * (maxHalf * 0.22);
-      if (x === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    }
-    ctx.stroke();
-
-    ctx.restore();
-  }
-
-  // End fade mask LAST so every layer (noise, grooves, highlight) also fades into holes
-  {
-    ctx.save();
-    ctx.globalCompositeOperation = 'destination-in';
-    const aGrad = ctx.createLinearGradient(0, 0, len, 0);
-    aGrad.addColorStop(0.0, 'rgba(0,0,0,0)');
-    aGrad.addColorStop(0.14, 'rgba(0,0,0,1)');
-    aGrad.addColorStop(0.86, 'rgba(0,0,0,1)');
-    aGrad.addColorStop(1.0, 'rgba(0,0,0,0)');
-    ctx.fillStyle = aGrad;
-    ctx.fillRect(0, -maxHalf - 6, len, thickness + 12);
-    ctx.restore();
-  }
-
-  // Optional fuzz (only when zoomed in)
-  if (thickness >= 9) {
-    ctx.save();
-    ctx.globalCompositeOperation = 'screen';
-    ctx.strokeStyle = 'rgba(255,255,255,0.06)';
-    ctx.lineWidth = 1;
-    for (let i = 0; i < 7; i++) {
-      const x = rng() * len;
-      const t = x / Math.max(1, len);
-      const tt = taper01(t);
-      const side = rng() < 0.5 ? -1 : 1;
-      const y = side * (maxHalf * (0.85 + rng() * 0.15));
-      const out = side * (maxHalf * (1.05 + rng() * 0.25));
-      ctx.beginPath();
-      ctx.moveTo(x, y);
-      ctx.lineTo(x + (rng() - 0.5) * 2, y + (out - y));
-      ctx.globalAlpha = 0.03 + 0.05 * tt;
-      ctx.stroke();
-    }
-    ctx.globalAlpha = 1;
-    ctx.restore();
-  }
+  const n = noiseTile(
+    32,
+    0.1,
+    hash2(Math.floor(variationSeed * 10000), Math.floor(thickness * 100))
+  );
+  ctx.globalCompositeOperation = 'soft-light';
+  ctx.drawImage(
+    n as any,
+    Math.min(x0, x1) - 8,
+    Math.min(y0, y1) - 8,
+    Math.abs(dx) + 16,
+    Math.abs(dy) + 16
+  );
 
   ctx.restore();
 }
 
+// -----------------------------
+// Required export: drawRealisticStitch
+// -----------------------------
 export function drawRealisticStitch(
   ctx: CanvasRenderingContext2D,
   screenX: number,
   screenY: number,
   cellScreenSize: number,
-  color: string,
+  colorHex: string,
   col: number,
   row: number
 ): void {
-  const randoms = getCellRandoms(col, row);
+  if (!assets && !assetsFailed) ensureAssetsLoading();
 
-  // Cheap fallback when zoomed out (no caching needed)
-  if (cellScreenSize < 12) {
+  const drawFallback = (): void => {
     const pad = cellScreenSize * 0.18;
     const x0 = screenX + pad;
     const y0 = screenY + pad;
     const x1 = screenX + cellScreenSize - pad;
     const y1 = screenY + cellScreenSize - pad;
 
-    const t = Math.max(1.2, cellScreenSize * 0.16);
-    ctx.strokeStyle = color;
-    ctx.lineWidth = t;
+    ctx.save();
+    ctx.strokeStyle = colorHex;
+    ctx.lineWidth = Math.max(1.2, cellScreenSize * 0.16);
     ctx.lineCap = 'round';
     ctx.beginPath();
     ctx.moveTo(x0, y1);
@@ -627,100 +695,49 @@ export function drawRealisticStitch(
     ctx.moveTo(x0, y0);
     ctx.lineTo(x1, y1);
     ctx.stroke();
+    ctx.restore();
+  };
+
+  if (!assets || cellScreenSize < 10) {
+    drawFallback();
     return;
   }
 
-  // Check if we have a cached version of this stitch
-  const cached = getCachedStitch(color, cellScreenSize, col, row);
-  if (cached) {
-    ctx.drawImage(cached as any, screenX, screenY);
-    return;
-  }
+  const q = quantiseSize(cellScreenSize);
 
-  // Render to offscreen canvas for caching
-  const roundedSize = Math.round(cellScreenSize / 4) * 4;
-  const offscreen = createOffscreenCanvas(roundedSize, roundedSize);
-  const offCtx = offscreen.getContext('2d') as
-    | CanvasRenderingContext2D
-    | OffscreenCanvasRenderingContext2D
-    | null;
+  const h = hash2(col, row);
+  const variant = h % VARIANTS;
+  const flipX = ((h >>> 2) & 1) === 1;
+  const flipY = ((h >>> 3) & 1) === 1;
 
-  if (!offCtx) {
-    // Fallback: draw directly if offscreen context creation fails
-    drawRealisticStitchInternal(ctx, 0, 0, roundedSize, color, randoms);
-    return;
-  }
+  const stamp = makeTintedStamp(colorHex, q, variant, flipX, flipY);
 
-  // Render to offscreen canvas
-  drawRealisticStitchInternal(offCtx as any, 0, 0, roundedSize, color, randoms);
+  const rnd = getCellRandoms(col, row);
+  const jitter = clamp(q * 0.01, 0.0, 0.6);
+  const jx = (rnd.offsetX1 - 0.5) * jitter;
+  const jy = (rnd.offsetY1 - 0.5) * jitter;
 
-  // Cache the rendered stitch
-  cacheStitch(color, cellScreenSize, col, row, offscreen);
-
-  // Draw the cached version to the main canvas
-  ctx.drawImage(offscreen as any, screenX, screenY);
-}
-
-// Internal rendering function (used for both direct and cached rendering)
-function drawRealisticStitchInternal(
-  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
-  screenX: number,
-  screenY: number,
-  cellScreenSize: number,
-  color: string,
-  randoms: ReturnType<typeof getCellRandoms>
-): void {
-  // Hole centres (fixed endpoints, variation happens inside the strand)
-  const inset = clamp(cellScreenSize * 0.06, 1.0, cellScreenSize * 0.14);
-  const hxL = screenX + inset;
-  const hxR = screenX + cellScreenSize - inset;
-  const hyT = screenY + inset;
-  const hyB = screenY + cellScreenSize - inset;
-
-  const baseThickness = Math.max(2.2, cellScreenSize * 0.3);
-  const thickness1 = baseThickness * randoms.thickness1;
-  const thickness2 = baseThickness * randoms.thickness2;
-
-  // Underlay bed shadow
   ctx.save();
-  ctx.shadowColor = 'rgba(0, 0, 0, 0.16)';
-  ctx.shadowBlur = baseThickness * 0.9;
-  ctx.strokeStyle = 'rgba(0, 0, 0, 0.04)';
-  ctx.lineWidth = baseThickness * 0.9;
-  ctx.lineCap = 'round';
-  ctx.beginPath();
-  ctx.moveTo(hxL, hyB);
-  ctx.lineTo(hxR, hyT);
-  ctx.moveTo(hxL, hyT);
-  ctx.lineTo(hxR, hyB);
-  ctx.stroke();
+  ctx.imageSmoothingEnabled = true;
+
+  ctx.shadowColor = `rgba(0,0,0,${STITCH_SHADOW_ALPHA})`;
+  ctx.shadowBlur = q * 0.1;
+  ctx.shadowOffsetX = 0;
+  ctx.shadowOffsetY = 0;
+
+  const inset = clamp(cellScreenSize * 0.05, 0.8, 2.8);
+  const dx = screenX + inset + jx;
+  const dy = screenY + inset + jy;
+  const ds = cellScreenSize - inset * 2;
+
+  ctx.drawImage(stamp as any, dx, dy, ds, ds);
+
   ctx.restore();
-
-  // Bottom strand (BL -> TR)
-  drawThreadStrand(ctx, hxL, hyB, hxR, hyT, thickness1, color, randoms.highlight1, false);
-
-  // Centre shadow for crossing depth
-  const cx = screenX + cellScreenSize / 2;
-  const cy = screenY + cellScreenSize / 2;
-  const shadowSize = Math.max(thickness2 * 1.15, baseThickness * 1.05);
-  const sGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, shadowSize);
-  sGrad.addColorStop(0, 'rgba(0, 0, 0, 0.14)');
-  sGrad.addColorStop(0.55, 'rgba(0, 0, 0, 0.06)');
-  sGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
-  ctx.fillStyle = sGrad;
-  ctx.fillRect(cx - shadowSize, cy - shadowSize, shadowSize * 2, shadowSize * 2);
-
-  // Top strand (TL -> BR)
-  drawThreadStrand(ctx, hxL, hyT, hxR, hyB, thickness2, color, randoms.highlight2, true);
-
-  // Hole overlays (hide blunt ends, sell "goes into cloth")
-  const holeR = clamp(cellScreenSize * 0.07, 1.2, 3.6);
-  drawHoleOverlay(ctx, hxL, hyT, holeR, FABRIC_COLOR);
-  drawHoleOverlay(ctx, hxR, hyT, holeR, FABRIC_COLOR);
-  drawHoleOverlay(ctx, hxL, hyB, holeR, FABRIC_COLOR);
-  drawHoleOverlay(ctx, hxR, hyB, holeR, FABRIC_COLOR);
 }
 
+// -----------------------------
+// Required export: drawWrongIndicator
+// -----------------------------
 export function drawWrongIndicator(
   ctx: CanvasRenderingContext2D,
   screenX: number,
@@ -748,6 +765,9 @@ export function drawWrongIndicator(
   ctx.fillText('!', centerX, centerY + 1);
 }
 
+// -----------------------------
+// Required export: renderCanvas
+// -----------------------------
 export function renderCanvas(rc: RenderContext): void {
   const {
     ctx,
@@ -761,6 +781,8 @@ export function renderCanvas(rc: RenderContext): void {
   } = rc;
 
   ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+
+  // Cloth now only draws behind pattern bounds, scales with zoom, pans with viewport
   drawFabricBackground(rc);
 
   const bounds = getVisibleGridBounds(
@@ -770,7 +792,10 @@ export function renderCanvas(rc: RenderContext): void {
     pattern.width,
     pattern.height
   );
+
   const cellScreenSize = CELL_SIZE * viewport.scale;
+
+  drawGridLines(rc, cellScreenSize);
 
   for (let row = bounds.minRow; row <= bounds.maxRow; row++) {
     for (let col = bounds.minCol; col <= bounds.maxCol; col++) {
@@ -794,6 +819,7 @@ export function renderCanvas(rc: RenderContext): void {
       } else {
         const colourIndex = state === StitchState.Wrong ? placedColors[cellIndex] : targetIndex;
         const paletteEntry = pattern.palette[colourIndex];
+
         if (paletteEntry) {
           drawRealisticStitch(ctx, screen.x, screen.y, cellScreenSize, paletteEntry.hex, col, row);
         }

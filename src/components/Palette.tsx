@@ -15,6 +15,39 @@ export const Palette = React.memo(function Palette() {
   const findNearestUnstitched = useGameStore(s => s.findNearestUnstitched);
   const navigateToCell = useGameStore(s => s.navigateToCell);
 
+  // Filter palette to only show entries with remaining stitches (memoized)
+  // Must be called before any early returns to satisfy Rules of Hooks
+  const visiblePalette = useMemo(() => {
+    if (!pattern || !progress) return [];
+    return pattern.palette.filter((_, index) => progress.paletteCounts[index].remainingTargets > 0);
+  }, [pattern, progress]);
+
+  const handlePaletteClick = useCallback(
+    (paletteIndex: number) => {
+      selectPalette(paletteIndex);
+
+      if (!pattern) return;
+
+      // Get canvas size from DOM (rough estimate)
+      const canvasContainer = document.querySelector('[data-canvas-container]');
+      const canvasWidth = canvasContainer?.clientWidth || 800;
+      const canvasHeight = canvasContainer?.clientHeight || 600;
+
+      // Get current viewport center in grid coords
+      const viewportCenter = getViewportCenterInGrid(canvasWidth, canvasHeight, viewport);
+
+      // Find nearest unstitched cell for this palette (uses indexed approach)
+      const nearest = findNearestUnstitched(paletteIndex, viewportCenter.col, viewportCenter.row);
+
+      if (nearest) {
+        // Navigate to that cell via store action
+        const cellIndex = nearest.row * pattern.width + nearest.col;
+        navigateToCell(cellIndex, { animate: true });
+      }
+    },
+    [pattern, viewport, selectPalette, findNearestUnstitched, navigateToCell]
+  );
+
   if (!pattern || !progress) {
     return (
       <div className="palette-container">
@@ -27,37 +60,6 @@ export const Palette = React.memo(function Palette() {
   }
 
   const wrongCount = getTotalWrongCount();
-
-  // Filter palette to only show entries with remaining stitches (memoized)
-  const visiblePalette = useMemo(
-    () => pattern.palette.filter(
-      (_, index) => progress.paletteCounts[index].remainingTargets > 0
-    ),
-    [pattern.palette, progress.paletteCounts]
-  );
-
-  const handlePaletteClick = useCallback((paletteIndex: number) => {
-    selectPalette(paletteIndex);
-
-    if (!pattern) return;
-
-    // Get canvas size from DOM (rough estimate)
-    const canvasContainer = document.querySelector('[data-canvas-container]');
-    const canvasWidth = canvasContainer?.clientWidth || 800;
-    const canvasHeight = canvasContainer?.clientHeight || 600;
-
-    // Get current viewport center in grid coords
-    const viewportCenter = getViewportCenterInGrid(canvasWidth, canvasHeight, viewport);
-
-    // Find nearest unstitched cell for this palette (uses indexed approach)
-    const nearest = findNearestUnstitched(paletteIndex, viewportCenter.col, viewportCenter.row);
-
-    if (nearest) {
-      // Navigate to that cell via store action
-      const cellIndex = nearest.row * pattern.width + nearest.col;
-      navigateToCell(cellIndex, { animate: true });
-    }
-  }, [pattern, viewport, selectPalette, findNearestUnstitched, navigateToCell]);
 
   return (
     <div className="palette-container">
