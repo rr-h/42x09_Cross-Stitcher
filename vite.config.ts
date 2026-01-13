@@ -12,4 +12,7 @@ export default defineConfig({
     setupFiles: './src/test/setup.ts',
     exclude: ['**/node_modules/**', '**/e2e/**'],
   },
+  // Disable automatic public directory copying - we use a custom script
+  // to exclude the 591MB patterns directory from the build
+  publicDir: false,
 });

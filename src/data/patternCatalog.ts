@@ -5,6 +5,7 @@ export interface PatternCatalogEntry {
   filename: string;
   displayName: string;
   sizeKB: number; // Approximate file size for sorting (smaller loads faster)
+  patternPath: string; // Path relative to /patterns/ directory
 }
 
 // Helper to convert filename to readable display name
@@ -29,7 +30,11 @@ const patternData: Array<{ filename: string; sizeKB: number }> = [
   { filename: 'vam5934_v1-1.oxs', sizeKB: 13466 },
   { filename: 'art-deco.oxs', sizeKB: 14231 },
   { filename: 'das-maedchen-mit-dem-perlenohrring-unrestauriert.oxs', sizeKB: 16744 },
-  { filename: 'The-Houses-of-Parliament-London-with-the-sun-breaking-through-the-fog-Claude-Monet.oxs', sizeKB: 17572 },
+  {
+    filename:
+      'The-Houses-of-Parliament-London-with-the-sun-breaking-through-the-fog-Claude-Monet.oxs',
+    sizeKB: 17572,
+  },
   { filename: 'Die-Sonne-1.oxs', sizeKB: 19403 },
   { filename: 'hygieia_.oxs', sizeKB: 21847 },
   { filename: 'Gelb-Rot-Blau.oxs', sizeKB: 22665 },
@@ -64,50 +69,52 @@ export const patternCatalog: PatternCatalogEntry[] = patternData.map(({ filename
   filename,
   displayName: filenameToDisplayName(filename),
   sizeKB,
+  patternPath: filename, // Path relative to /patterns/
 }));
 
-// Load pattern file content from the bundled assets
-// Uses Cache API to avoid re-downloading files across sessions
-export async function loadPatternFile(filename: string): Promise<string> {
-  const url = new URL(`../patterns/${filename}`, import.meta.url).href;
+// Export pattern loader for use in components
+export { patternLoader } from '../services/PatternLoader';
 
-  // Try to get from Cache API first
-  if ('caches' in window) {
-    try {
-      const cache = await caches.open('pattern-files-v1');
-      const cachedResponse = await cache.match(url);
+// Progress callback type for pattern loading
+export type PatternLoadProgress = {
+  loaded: number;
+  total: number;
+  percentage: number;
+};
 
-      if (cachedResponse) {
-        return await cachedResponse.text();
-      }
-    } catch (error) {
-      console.warn('Cache API error, falling back to network:', error);
-    }
-  }
+// Convenience function to load a pattern file by filename
+// Returns the file content as a string (XML for OXS files)
+// Uses IndexedDB caching for offline support and faster subsequent loads
+export async function loadPatternFile(
+  filename: string,
+  onProgress?: (progress: PatternLoadProgress) => void
+): Promise<string> {
+  const { patternLoader } = await import('../services/PatternLoader');
+  await patternLoader.init();
 
-  // Fetch from network
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Failed to load pattern: ${filename}`);
-  }
+  const arrayBuffer = await patternLoader.loadPattern(filename, onProgress);
+  const decoder = new TextDecoder('utf-8');
+  return decoder.decode(arrayBuffer);
+}
 
-  const content = await response.text();
+// Preload popular/small patterns in the background
+// Call this after app initialization to warm up the cache
+export async function preloadPopularPatterns(): Promise<void> {
+  const { patternLoader } = await import('../services/PatternLoader');
+  await patternLoader.init();
 
-  // Cache the response for future use
-  if ('caches' in window) {
-    try {
-      const cache = await caches.open('pattern-files-v1');
-      const cacheResponse = new Response(content, {
-        headers: {
-          'Content-Type': 'text/plain',
-          'Cache-Control': 'max-age=31536000', // 1 year
-        },
-      });
-      await cache.put(url, cacheResponse);
-    } catch (error) {
-      console.warn('Failed to cache pattern file:', error);
-    }
-  }
+  // Preload the smallest 5 patterns (fastest to download)
+  const smallPatterns = patternCatalog
+    .filter(p => p.sizeKB < 5000) // Under 5MB
+    .slice(0, 5)
+    .map(p => p.filename);
 
-  return content;
+  await patternLoader.preloadPatterns(smallPatterns, false);
+}
+
+// Get cache statistics (useful for debugging/UI)
+export async function getPatternCacheStats() {
+  const { patternLoader } = await import('../services/PatternLoader');
+  await patternLoader.init();
+  return patternLoader.getCacheStats();
 }

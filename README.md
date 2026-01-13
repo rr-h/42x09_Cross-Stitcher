@@ -5,12 +5,14 @@ A web-based cross-stitch pattern game that lets you interactively stitch digital
 ## Features
 
 - **Pattern Import**: Load patterns from `.oxs` (Open Cross Stitch) or `.fcjson` (FlossCross JSON) files
+- **Lazy Loading**: Patterns load on-demand with progress tracking and IndexedDB caching
 - **Realistic Stitches**: Thread-like stitch rendering with highlights, shadows, and subtle variations
 - **Interactive Stitching**: Click cells to place stitches, with validation for correct/incorrect placements
 - **Palette Management**: Color palette with symbols, thread codes, and remaining stitch counts
 - **Auto-Navigation**: Clicking a palette entry navigates to the nearest unstitched cell for that color
 - **Stitch Picker Tool**: Remove incorrect stitches with a dedicated picker mode
 - **Progress Persistence**: Your progress is saved locally and restored when you reload
+- **Offline Support**: Cached patterns work offline after first load
 - **Zoom & Pan**: Smooth navigation with mouse wheel zoom and drag-to-pan
 - **Completion Celebration**: Visual celebration when you complete a pattern
 
@@ -19,18 +21,18 @@ A web-based cross-stitch pattern game that lets you interactively stitch digital
 ### Prerequisites
 
 - Node.js 18+
-- npm 9+
+- pnpm 9+ (or npm 9+)
 
 ### Installation
 
 ```bash
-npm install
+pnpm install
 ```
 
 ### Development
 
 ```bash
-npm run dev
+pnpm dev
 ```
 
 Open http://localhost:5173 in your browser.
@@ -38,25 +40,26 @@ Open http://localhost:5173 in your browser.
 ### Build
 
 ```bash
-npm run build
+pnpm build
 ```
+
+The build excludes pattern files (591MB) and produces a ~4MB output. Patterns are lazy-loaded from static files with IndexedDB caching.
 
 ### Testing
 
 ```bash
 # Unit tests
-npm test
+pnpm test
 
 # E2E tests (requires Playwright browsers)
-npx playwright install
-npm run test:e2e
+pnpm test:e2e
 ```
 
 ### Linting
 
 ```bash
-npm run lint
-npm run format
+pnpm run lint
+pnpm run format
 ```
 
 ## Usage
@@ -134,10 +137,18 @@ src/
 │   ├── PatternCanvas.tsx
 │   ├── Palette.tsx
 │   ├── TopBar.tsx
+├── components/      # React components
+│   ├── PatternCanvas.tsx
+│   ├── Palette.tsx
 │   └── FileDropZone.tsx
 ├── parsers/         # File format parsers
 │   ├── oxs.ts
 │   └── fcjson.ts
+├── services/        # Core services
+│   └── PatternLoader.ts  # Lazy loading + caching
+├── hooks/           # React hooks
+│   ├── usePattern.ts     # Pattern loading hook
+│   └── useAuth.ts
 ├── store/           # Zustand state management
 │   ├── index.ts
 │   └── persistence.ts
@@ -156,10 +167,17 @@ src/
 - **TypeScript** - Type safety
 - **Vite** - Build tool
 - **Zustand** - State management
-- **IndexedDB (idb)** - Local persistence
+- **IndexedDB (idb)** - Pattern caching + local persistence
 - **Canvas2D** - Rendering
 - **Vitest** - Unit testing
 - **Playwright** - E2E testing
+
+## Documentation
+
+- **[PATTERN_QUICKSTART.md](docs/PATTERN_QUICKSTART.md)** - Pattern loading quick start guide
+- **[PATTERN_LOADING.md](docs/PATTERN_LOADING.md)** - Detailed pattern loading API documentation
+- **[DEPLOYMENT_OPTIMIZATION.md](docs/DEPLOYMENT_OPTIMIZATION.md)** - How we reduced build from 519MB to 3.9MB
+- **[ARCHITECTURE.md](ARCHITECTURE.md)** - System architecture overview
 
 ## License
 
