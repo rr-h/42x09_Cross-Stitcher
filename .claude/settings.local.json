@@ -3,7 +3,8 @@
     "allow": [
       "Bash(npm run typecheck:*)",
       "Bash(git push:*)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(ls:*)"
     ]
   }
 }

@@ -1,14 +1,16 @@
 import { openDB, type IDBPDatabase } from 'idb';
 import type { PaletteCounts, UserProgress, ViewportTransform, PatternDoc } from '../types';
+import type { SyncMetadata } from '../types/sync.types';
 import { NO_STITCH } from '../types';
 
 const DB_NAME = 'cross-stitcher-db';
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 
 // Stores
 const PROGRESS_STORE = 'progress';
 const SNAPSHOT_STORE = 'snapshots';
 const PATTERN_STORE = 'patterns';
+const SYNC_META_STORE = 'sync_metadata';
 
 type MaybeArrayBuffer = ArrayBuffer | number[];
 
@@ -53,6 +55,10 @@ export function getDB(): Promise<IDBPDatabase> {
 
         if (!db.objectStoreNames.contains(PATTERN_STORE)) {
           db.createObjectStore(PATTERN_STORE, { keyPath: 'id' });
+        }
+
+        if (!db.objectStoreNames.contains(SYNC_META_STORE)) {
+          db.createObjectStore(SYNC_META_STORE, { keyPath: 'patternId' });
         }
       },
     });
@@ -312,4 +318,50 @@ export async function cleanupPatternProgress(patternId: string): Promise<void> {
     // Log but don't throw - allow local cleanup to succeed even if remote fails
     console.error('Failed to delete remote snapshots:', error);
   }
+}
+
+// ============================================================================
+// Sync Metadata Management
+// ============================================================================
+
+/**
+ * Save sync metadata for a pattern
+ */
+export async function saveSyncMeta(meta: SyncMetadata): Promise<void> {
+  const db = await getDB();
+  await db.put(SYNC_META_STORE, meta);
+}
+
+/**
+ * Load sync metadata for a pattern
+ */
+export async function loadSyncMeta(patternId: string): Promise<SyncMetadata | null> {
+  const db = await getDB();
+  const meta = (await db.get(SYNC_META_STORE, patternId)) as SyncMetadata | undefined;
+  return meta ?? null;
+}
+
+/**
+ * Get all sync metadata
+ */
+export async function getAllSyncMeta(): Promise<SyncMetadata[]> {
+  const db = await getDB();
+  return (await db.getAll(SYNC_META_STORE)) as SyncMetadata[];
+}
+
+/**
+ * Delete sync metadata for a pattern
+ */
+export async function deleteSyncMeta(patternId: string): Promise<void> {
+  const db = await getDB();
+  await db.delete(SYNC_META_STORE, patternId);
+}
+
+/**
+ * Get all pattern IDs from IndexedDB
+ */
+export async function getAllPatternIds(): Promise<string[]> {
+  const db = await getDB();
+  const patterns = (await db.getAll(PATTERN_STORE)) as PersistedPattern[];
+  return patterns.map(p => p.id);
 }

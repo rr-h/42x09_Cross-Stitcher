@@ -5,6 +5,8 @@ import { useGameStore } from '../store/storeFunctions';
 import type { ViewportTransform } from '../types';
 import { calculateFitViewport, clampViewport } from '../utils/coordinates';
 import { AuthButton } from './AuthButton';
+import { useAuth } from '../hooks/useAuth';
+import { usePatternSync } from '../hooks/usePatternSync';
 
 // Lazy load modals to reduce initial bundle size
 const ImageImportModal = lazy(() =>
@@ -34,6 +36,26 @@ export const TopBar = React.memo(function TopBar() {
   const setViewport = useGameStore(s => s.setViewport);
   const setToolMode = useGameStore(s => s.setToolMode);
   const setShowActivePatterns = useGameStore(s => s.setShowActivePatterns);
+
+  const { user } = useAuth();
+  const { syncStatus, triggerManualSync } = usePatternSync();
+
+  const formatLastSyncTime = (timestamp: number | null): string => {
+    if (!timestamp) return 'Never synced';
+    const secondsAgo = Math.floor((Date.now() - timestamp) / 1000);
+    if (secondsAgo < 60) return 'Just now';
+    if (secondsAgo < 3600) return `${Math.floor(secondsAgo / 60)}m ago`;
+    if (secondsAgo < 86400) return `${Math.floor(secondsAgo / 3600)}h ago`;
+    return `${Math.floor(secondsAgo / 86400)}d ago`;
+  };
+
+  const handleSyncClick = async () => {
+    try {
+      await triggerManualSync();
+    } catch (error) {
+      console.error('Sync failed:', error);
+    }
+  };
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -272,6 +294,27 @@ export const TopBar = React.memo(function TopBar() {
             <div style={styles.separator} />
           </>
         )}
+        {user && (
+          <>
+            <button
+              onClick={handleSyncClick}
+              disabled={syncStatus.state === 'syncing'}
+              title={
+                syncStatus.state === 'error'
+                  ? `Sync error: ${syncStatus.error}`
+                  : `Last synced: ${formatLastSyncTime(syncStatus.lastSyncedAt)}`
+              }
+              style={{
+                ...styles.syncButton,
+                opacity: syncStatus.state === 'syncing' ? 0.6 : 1,
+                cursor: syncStatus.state === 'syncing' ? 'not-allowed' : 'pointer',
+              }}
+            >
+              {syncStatus.state === 'syncing' ? '↻' : syncStatus.state === 'error' ? '⚠' : '☁'}
+            </button>
+            <div style={styles.separator} />
+          </>
+        )}
         <AuthButton />
       </div>
 
@@ -381,5 +424,18 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: '0.85rem',
     fontWeight: '500',
     minWidth: '70px',
+  },
+  syncButton: {
+    width: '32px',
+    height: '32px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#f0f0f0',
+    border: '1px solid #ddd',
+    borderRadius: '0.25rem',
+    fontSize: '1.2rem',
+    fontWeight: 'bold',
+    transition: 'background-color 0.15s',
   },
 };
