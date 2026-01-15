@@ -18,12 +18,16 @@ const PatternGalleryModal = lazy(() =>
 const ActivePatternsModal = lazy(() =>
   import('./ActivePatternsModal').then(module => ({ default: module.ActivePatternsModal }))
 );
+const HelpModal = lazy(() =>
+  import('./HelpModal').then(module => ({ default: module.HelpModal }))
+);
 
 export const TopBar = React.memo(function TopBar() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [showGallery, setShowGallery] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
 
   const pattern = useGameStore(s => s.pattern);
   const progress = useGameStore(s => s.progress);
@@ -315,6 +319,13 @@ export const TopBar = React.memo(function TopBar() {
             <div style={styles.separator} />
           </>
         )}
+        <button
+          onClick={() => setShowHelp(true)}
+          style={styles.helpButton}
+          title="How to play"
+        >
+          ?
+        </button>
         <AuthButton />
       </div>
 
@@ -328,6 +339,10 @@ export const TopBar = React.memo(function TopBar() {
 
       <Suspense fallback={null}>
         {showActivePatterns && <ActivePatternsModal onClose={() => setShowActivePatterns(false)} />}
+      </Suspense>
+
+      <Suspense fallback={null}>
+        {showHelp && <HelpModal onClose={() => setShowHelp(false)} />}
       </Suspense>
     </div>
   );
@@ -436,6 +451,22 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: '0.25rem',
     fontSize: '1.2rem',
     fontWeight: 'bold',
+    transition: 'background-color 0.15s',
+  },
+  helpButton: {
+    width: '28px',
+    height: '28px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#4A90D9',
+    color: 'white',
+    border: 'none',
+    borderRadius: '50%',
+    fontSize: '0.9rem',
+    fontWeight: 'bold',
+    cursor: 'pointer',
+    marginRight: '0.5rem',
     transition: 'background-color 0.15s',
   },
 };

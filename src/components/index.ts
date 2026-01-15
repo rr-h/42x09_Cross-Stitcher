@@ -1,6 +1,7 @@
 export { ActivePatternsModal } from './ActivePatternsModal.tsx';
 export { AuthButton } from './AuthButton.tsx';
 export { FileDropZone } from './FileDropZone.tsx';
+export { HelpModal } from './HelpModal.tsx';
 export { ImageImportModal } from './ImageImportModal.tsx';
 export { LoginModal } from './LoginModal.tsx';
 export { Palette } from './Palette.tsx';
