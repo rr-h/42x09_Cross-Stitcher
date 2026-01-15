@@ -261,6 +261,7 @@ export function HelpModal({ onClose }: HelpModalProps) {
                 <kbd style={styles.kbd}>0</kbd>
                 <span>Fit to Screen</span>
               </div>
+              <div>
                <ul style={styles.list}>
               <li style={styles.listItem}>
               <strong>Doubleclick Highlighted cells:</strong> activate quick fill
@@ -271,7 +272,6 @@ export function HelpModal({ onClose }: HelpModalProps) {
                 to restore the cell for correction.
               </li>
             </ul>
-            
             </div>
           </section>
         </div>
