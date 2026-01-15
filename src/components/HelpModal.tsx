@@ -261,7 +261,9 @@ export function HelpModal({ onClose }: HelpModalProps) {
                 <kbd style={styles.kbd}>0</kbd>
                 <span>Fit to Screen</span>
               </div>
-              <div>
+            </div>
+          </section>
+          <div>
                <ul style={styles.list}>
               <li style={styles.listItem}>
               <strong>Doubleclick Highlighted cells:</strong> activate quick fill
@@ -273,10 +275,7 @@ export function HelpModal({ onClose }: HelpModalProps) {
               </li>
             </ul>
             </div>
-            </div>
-          </section>
         </div>
-
         <div style={styles.footer}>
           <button onClick={onClose} style={styles.closeBtn}>
             Got it!
