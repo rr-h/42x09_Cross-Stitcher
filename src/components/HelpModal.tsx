@@ -119,7 +119,8 @@ export function HelpModal({ onClose }: HelpModalProps) {
               <p style={styles.toolDescription}>
                 Fill an entire area at once! Click on any cell to automatically fill all connected
                 cells that share the same target color. This is perfect for quickly completing
-                large areas of the same color. Only correct matches are placed.
+                large areas of the same color. Only correct matches are placed. This tool can also be 
+                quickly accessed, as needed, by rapidly double clicking on an area of highlighted cells.
               </p>
             </div>
 
@@ -128,7 +129,8 @@ export function HelpModal({ onClose }: HelpModalProps) {
               <p style={styles.toolDescription}>
                 Made a mistake? Use the Picker tool to remove incorrect stitches. Click on any
                 wrongly-placed stitch to remove it. This tool only works on incorrect stitches -
-                correct ones are protected.
+                correct ones are protected. This tool can also be quickly accessed by double clicking
+                on an incorrect (marked by a !) cell.
               </p>
             </div>
           </section>
@@ -231,9 +233,9 @@ export function HelpModal({ onClose }: HelpModalProps) {
             </ul>
           </section>
 
-          {/* Keyboard Shortcuts */}
+          {/* Keyboard and Moouse Shortcuts */}
           <section style={styles.section}>
-            <h3 style={styles.sectionTitle}>Keyboard Shortcuts</h3>
+            <h3 style={styles.sectionTitle}>Keyboard and Mouse Shortcuts</h3>
             <div style={styles.shortcutsGrid}>
               <div style={styles.shortcut}>
                 <kbd style={styles.kbd}>1</kbd>
@@ -259,6 +261,17 @@ export function HelpModal({ onClose }: HelpModalProps) {
                 <kbd style={styles.kbd}>0</kbd>
                 <span>Fit to Screen</span>
               </div>
+               <ul style={styles.list}>
+              <li style={styles.listItem}>
+              <strong>Doubleclick Highlighted cells:</strong> activate quick fill
+                stitching for currently selected colour.
+              </li>
+              <li style={styles.listItem}>
+                <strong>Doubleclick Incorrect Stitchs:</strong> remove the stitch
+                to restore the cell for correction.
+              </li>
+            </ul>
+            
             </div>
           </section>
         </div>
