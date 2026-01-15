@@ -273,6 +273,7 @@ export function HelpModal({ onClose }: HelpModalProps) {
               </li>
             </ul>
             </div>
+            </div>
           </section>
         </div>
 
