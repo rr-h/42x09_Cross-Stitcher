@@ -66,8 +66,12 @@ export function HelpModal({ onClose }: HelpModalProps) {
                 stitch. The symbol and faint color indicate which thread to use.
               </li>
               <li style={styles.listItem}>
-                <strong>Filled cells:</strong> These are stitches you've already placed. Correct
-                stitches show a solid color matching the target.
+                <strong>Empty highlighted cells:</strong> These show the target cells you need to
+                stitch, in your currently selected color. The symbol indicate which thread to use.
+              </li>
+              <li style={styles.listItem}>
+                <strong>Filled/Complete cells:</strong> These are stitches you've already placed. 
+                Correct stitches show a solid color matching the target.
               </li>
               <li style={styles.listItem}>
                 <strong>Fabric background:</strong> Light cream-colored cells with no symbol are
@@ -88,7 +92,8 @@ export function HelpModal({ onClose }: HelpModalProps) {
                 <strong>Fit:</strong> Click the "Fit" button to see the entire pattern on screen.
               </li>
               <li style={styles.listItem}>
-                <strong>Pan:</strong> Click and drag on the canvas to move around the pattern.
+                <strong>Pan:</strong> Click on an existing stitch and drag on the canvas to move 
+                around the pattern.
               </li>
               <li style={styles.listItem}>
                 <strong>Pinch to Zoom:</strong> On touch devices, use two fingers to zoom in and
@@ -140,12 +145,13 @@ export function HelpModal({ onClose }: HelpModalProps) {
             <h3 style={styles.sectionTitle}>The Color Palette</h3>
             <p style={styles.paragraph}>
               The palette panel (on the right side or bottom on mobile) shows all the thread colors
-              in your pattern:
+              in your selected pattern:
             </p>
             <ul style={styles.list}>
               <li style={styles.listItem}>
                 <strong>Click a color:</strong> Select it as your active thread for the Needle
-                tool.
+                tool. Click again to recentre pattern to show you remaining cells that require
+                stitching in your selected color.
               </li>
               <li style={styles.listItem}>
                 <strong>Color info:</strong> Each entry shows the DMC thread code, color name, and
@@ -225,6 +231,11 @@ export function HelpModal({ onClose }: HelpModalProps) {
               <li style={styles.listItem}>
                 <strong>Check your progress:</strong> Use the palette to see which colors need the
                 most work.
+              </li>
+              <li style={styles.listItem}>
+                <strong>Check your progress:</strong> Remember you should click your current color again 
+                to recentre the pattern, allowing you to easily identify remaining cells that require
+                stitching in your current color.
               </li>
               <li style={styles.listItem}>
                 <strong>Take your time:</strong> There's no rush - cross-stitching is meant to be
