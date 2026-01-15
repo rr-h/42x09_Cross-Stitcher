@@ -63,15 +63,15 @@ export function HelpModal({ onClose }: HelpModalProps) {
             <ul style={styles.list}>
               <li style={styles.listItem}>
                 <strong>Empty cells with symbols:</strong> These show the target color you need to
-                stitch. The symbol and faint color indicate which thread to use.
+                stitch. The symbols and highlight color indicate which thread to use.
               </li>
               <li style={styles.listItem}>
                 <strong>Empty highlighted cells:</strong> These show the target cells you need to
-                stitch, in your currently selected color. The symbol indicate which thread to use.
+                stitch, in your currently selected color.
               </li>
               <li style={styles.listItem}>
                 <strong>Filled/Complete cells:</strong> These are stitches you've already placed. 
-                Correct stitches show a solid color matching the target.
+                Correct stitches show a colored "X-stitch" matching the target.
               </li>
               <li style={styles.listItem}>
                 <strong>Fabric background:</strong> Light cream-colored cells with no symbol are
