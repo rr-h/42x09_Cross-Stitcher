@@ -6,6 +6,7 @@ import {
   listUserPatterns,
 } from './patternSync';
 import { getAllPatternIds, loadPattern, loadProgress } from '../store/persistence';
+import { mergeCompletedPatterns } from './completedPatternSync';
 
 /**
  * Check if there are any patterns in local IndexedDB
@@ -102,6 +103,10 @@ export async function performInitialSync(): Promise<void> {
       console.log('[InitialSync] Both local and remote patterns exist: performing bidirectional sync');
       await syncAllPatterns();
     }
+
+    // Always sync completed patterns (they're independent of active patterns)
+    console.log('[InitialSync] Syncing completed patterns...');
+    await mergeCompletedPatterns();
 
     console.log('[InitialSync] Initial sync completed successfully');
   } catch (error) {

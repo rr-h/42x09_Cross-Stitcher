@@ -12,6 +12,8 @@ import { NO_STITCH, StitchState } from '../types';
 import { chooseBestProgress } from '../utils/progressScoring';
 import { UnstitchedIndex } from '../utils/UnstitchedIndex';
 import { loadProgress, savePattern, saveProgress, cleanupPatternProgress } from './persistence';
+import { captureCompletedPattern, saveCompletedPattern } from './completedPatterns';
+import { uploadCompletedPattern } from '../sync/completedPatternSync';
 
 /**
  * Debounced saveProgress to reduce IndexedDB write frequency.
@@ -291,17 +293,9 @@ export const useGameStore = create<GameState>((set, get) => {
         showCelebration: isNowComplete && !wasComplete,
       });
 
-      // If pattern just completed, clean up progress after a delay
-      if (isNowComplete && !wasComplete) {
-        // Wait a moment to let the celebration show, then clean up
-        setTimeout(async () => {
-          try {
-            await cleanupPatternProgress(pattern.id);
-          } catch (error) {
-            console.error('Failed to cleanup pattern progress:', error);
-          }
-        }, 2000); // 2 second delay to show celebration first
-      } else {
+      // Don't auto-delete on completion - let user manually dismiss celebration
+      // Pattern will be cleaned up when user clicks "Done" in celebration modal
+      if (!isNowComplete || wasComplete) {
         // Use debounced save for individual stitches to reduce I/O overhead
         debouncedSaveProgress(updatedProgress);
       }
@@ -395,17 +389,9 @@ export const useGameStore = create<GameState>((set, get) => {
         showCelebration: isNowComplete && !wasComplete,
       });
 
-      // If pattern just completed, clean up progress after a delay
-      if (isNowComplete && !wasComplete) {
-        // Wait a moment to let the celebration show, then clean up
-        setTimeout(async () => {
-          try {
-            await cleanupPatternProgress(pattern.id);
-          } catch (error) {
-            console.error('Failed to cleanup pattern progress:', error);
-          }
-        }, 2000); // 2 second delay to show celebration first
-      } else {
+      // Don't auto-delete on completion - let user manually dismiss celebration
+      // Pattern will be cleaned up when user clicks "Done" in celebration modal
+      if (!isNowComplete || wasComplete) {
         saveProgress(updatedProgress);
       }
     },
@@ -484,10 +470,30 @@ export const useGameStore = create<GameState>((set, get) => {
       set({ navigationRequest: null });
     },
 
-    closeCelebration: () => {
+    closeCelebration: async () => {
+      const { pattern } = get();
       set({ showCelebration: false });
-      // After closing celebration, reset to go back to pattern selection
-      // This ensures the completed pattern is cleared from view
+
+      // Capture completed pattern snapshot before cleanup
+      if (pattern) {
+        try {
+          // Create and save the completed pattern record
+          const completed = await captureCompletedPattern(pattern);
+          await saveCompletedPattern(completed);
+
+          // Try to upload to Supabase (non-blocking, will retry on next sync if it fails)
+          uploadCompletedPattern(completed).catch(error => {
+            console.warn('Failed to upload completed pattern to Supabase:', error);
+          });
+
+          // Clean up the in-progress pattern
+          await cleanupPatternProgress(pattern.id);
+        } catch (error) {
+          console.error('Failed to save completed pattern:', error);
+        }
+      }
+
+      // Reset to go back to pattern selection
       get().reset();
     },
 

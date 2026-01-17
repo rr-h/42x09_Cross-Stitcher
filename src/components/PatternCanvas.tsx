@@ -640,6 +640,26 @@ export const PatternCanvas = React.memo(function PatternCanvas() {
     clearNavigationRequest();
   }, [navigationRequest, pattern, navigateToCellInternal, clearNavigationRequest]);
 
+  // Pre-calculate confetti styles to avoid impure Math.random() in render
+  const confettiPieces = useMemo(() => {
+    return Array.from({ length: 50 }).map((_, i) => {
+      // Use deterministic math (Math.sin) instead of Math.random logic to keep render pure
+      const s1 = Math.abs(Math.sin((i + 1) * 123.45));
+      const s2 = Math.abs(Math.sin((i + 1) * 678.9));
+      const s3 = Math.abs(Math.sin((i + 1) * 456.7));
+      const s4 = Math.abs(Math.sin((i + 1) * 890.1));
+
+      return {
+        id: i,
+        backgroundColor: ['#FFD700', '#FF69B4', '#00CED1', '#FF6347', '#32CD32'][i % 5],
+        left: `${s1 * 100}%`,
+        animationDuration: `${2 + s2 * 3}s`,
+        animationDelay: `${s3 * 0.5}s`,
+        rotation: s4 * 360,
+      };
+    });
+  }, []);
+
   if (!pattern) {
     return (
       <div
@@ -690,63 +710,131 @@ export const PatternCanvas = React.memo(function PatternCanvas() {
       />
 
       {showCelebration && (
-        <div
-          style={{
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            backgroundColor: 'rgba(0, 0, 0, 0.6)',
-            zIndex: 100,
-            padding: '1rem',
-          }}
-          onClick={closeCelebration}
-        >
+        <>
+          {/* Confetti animation overlay - non-blocking */}
           <div
             style={{
-              backgroundColor: 'white',
-              padding: '1.5rem 2rem',
-              borderRadius: '1rem',
-              textAlign: 'center',
-              boxShadow: '0 4px 20px rgba(0, 0, 0, 0.3)',
-              maxWidth: '90vw',
-              width: '400px',
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              pointerEvents: 'none',
+              overflow: 'hidden',
+              zIndex: 100,
             }}
           >
-            <h2
-              style={{
-                fontSize: 'clamp(0.75rem, 4vw, 1rem)',
-                marginBottom: '0.75rem',
-                color: '#2D5A27',
-              }}
-            >
-              🎉 Congratulations! 🎉
-            </h2>
-            <p style={{ fontSize: 'clamp(0.75rem, 3vw, 1rem)', color: '#666' }}>
-              You completed the pattern!
-            </p>
-            <button
-              onClick={closeCelebration}
-              style={{
-                marginTop: '1.25rem',
-                padding: '0.625rem 1.5rem',
-                fontSize: 'clamp(0.775rem, 2vw, 0.9rem)',
-                backgroundColor: '#2D5A27',
-                color: 'white',
-                border: 'none',
-                borderRadius: '0.5rem',
-                cursor: 'pointer',
-                minWidth: '120px',
-              }}
-            >
-              Close
-            </button>
+            {confettiPieces.map(piece => (
+              <div
+                key={piece.id}
+                style={{
+                  position: 'absolute',
+                  width: '10px',
+                  height: '10px',
+                  backgroundColor: piece.backgroundColor,
+                  top: '-10px',
+                  left: piece.left,
+                  animation: `confetti-fall ${piece.animationDuration} linear ${piece.animationDelay} infinite`,
+                  opacity: 0.8,
+                  borderRadius: '2px',
+                  transform: `rotate(${piece.rotation}deg)`,
+                }}
+              />
+            ))}
           </div>
-        </div>
+
+          {/* Celebration modal - positioned at top, non-blocking */}
+          <div
+            style={{
+              position: 'absolute',
+              top: '1rem',
+              left: '50%',
+              transform: 'translateX(-50%)',
+              zIndex: 101,
+              pointerEvents: 'auto',
+              animation: 'celebration-slide-in 0.5s ease-out',
+            }}
+          >
+            <div
+              style={{
+                backgroundColor: 'white',
+                padding: '1.5rem 2rem',
+                borderRadius: '1rem',
+                textAlign: 'center',
+                boxShadow: '0 4px 20px rgba(0, 0, 0, 0.3)',
+                maxWidth: '90vw',
+                width: '400px',
+                border: '3px solid #2D5A27',
+              }}
+            >
+              <h2
+                style={{
+                  fontSize: 'clamp(1rem, 4vw, 1.5rem)',
+                  marginBottom: '0.75rem',
+                  color: '#2D5A27',
+                }}
+              >
+                🎉 Congratulations! 🎉
+              </h2>
+              <p
+                style={{
+                  fontSize: 'clamp(0.875rem, 3vw, 1rem)',
+                  color: '#666',
+                  marginBottom: '0.5rem',
+                }}
+              >
+                You completed the pattern!
+              </p>
+              <p
+                style={{
+                  fontSize: 'clamp(0.75rem, 2.5vw, 0.875rem)',
+                  color: '#999',
+                  marginBottom: '1rem',
+                }}
+              >
+                Take a moment to zoom and admire your work!
+              </p>
+              <button
+                onClick={closeCelebration}
+                style={{
+                  padding: '0.625rem 1.5rem',
+                  fontSize: 'clamp(0.775rem, 2vw, 0.9rem)',
+                  backgroundColor: '#2D5A27',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '0.5rem',
+                  cursor: 'pointer',
+                  minWidth: '120px',
+                  transition: 'background-color 0.2s',
+                }}
+                onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#1f3f1b')}
+                onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#2D5A27')}
+              >
+                Done
+              </button>
+            </div>
+          </div>
+
+          {/* CSS animations */}
+          <style>{`
+            @keyframes confetti-fall {
+              to {
+                transform: translateY(${window.innerHeight + 20}px) rotate(720deg);
+              }
+            }
+
+            @keyframes celebration-slide-in {
+              from {
+                opacity: 0;
+                transform: translateX(-50%) translateY(-20px);
+              }
+              to {
+                opacity: 1;
+                transform: translateX(-50%) translateY(0);
+              }
+            }
+          `}</style>
+        </>
       )}
     </div>
   );

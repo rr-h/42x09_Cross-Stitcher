@@ -1,5 +1,6 @@
 export { NO_STITCH, StitchState } from './general.types.ts';
 export type {
+  CompletedPattern,
   GridCell,
   PaletteCounts,
   PaletteEntry,

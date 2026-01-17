@@ -63,3 +63,23 @@ export interface SyncMetadata {
   remoteUpdatedAt: number | null; // Epoch milliseconds
   needsUpload: boolean;
 }
+
+// ============================================================================
+// Completed Patterns Types
+// ============================================================================
+
+/**
+ * Completed pattern stored in Supabase completed_patterns table
+ */
+export interface RemoteCompletedPattern {
+  id: string;
+  user_id: string;
+  pattern_id: string; // Original pattern ID
+  title: string;
+  width: number;
+  height: number;
+  snapshot_url: string; // Supabase storage URL for full resolution image
+  thumbnail_url: string; // Supabase storage URL for thumbnail
+  completed_at: string; // ISO timestamp
+  created_at: string; // ISO timestamp
+}

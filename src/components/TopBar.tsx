@@ -1,12 +1,12 @@
-import React, { Suspense, lazy, useMemo, useRef, useState } from 'react';
+import React, { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
 import { isImageFile } from '../converters/imageToPattern';
+import { useAuth } from '../hooks/useAuth';
+import { usePatternSync } from '../hooks/usePatternSync';
 import { parsePatternFile } from '../parsers';
 import { useGameStore } from '../store/storeFunctions';
 import type { ViewportTransform } from '../types';
 import { calculateFitViewport, clampViewport } from '../utils/coordinates';
 import { AuthButton } from './AuthButton';
-import { useAuth } from '../hooks/useAuth';
-import { usePatternSync } from '../hooks/usePatternSync';
 
 // Lazy load modals to reduce initial bundle size
 const ImageImportModal = lazy(() =>
@@ -18,15 +18,17 @@ const PatternGalleryModal = lazy(() =>
 const ActivePatternsModal = lazy(() =>
   import('./ActivePatternsModal').then(module => ({ default: module.ActivePatternsModal }))
 );
-const HelpModal = lazy(() =>
-  import('./HelpModal').then(module => ({ default: module.HelpModal }))
+const CompletedGalleryModal = lazy(() =>
+  import('./CompletedGalleryModal').then(module => ({ default: module.CompletedGalleryModal }))
 );
+const HelpModal = lazy(() => import('./HelpModal').then(module => ({ default: module.HelpModal })));
 
 export const TopBar = React.memo(function TopBar() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [showGallery, setShowGallery] = useState(false);
+  const [showCompletedGallery, setShowCompletedGallery] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
 
   const pattern = useGameStore(s => s.pattern);
@@ -44,9 +46,16 @@ export const TopBar = React.memo(function TopBar() {
   const { user } = useAuth();
   const { syncStatus, triggerManualSync } = usePatternSync();
 
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), 10000);
+    return () => clearInterval(interval);
+  }, []);
+
   const formatLastSyncTime = (timestamp: number | null): string => {
     if (!timestamp) return 'Never synced';
-    const secondsAgo = Math.floor((Date.now() - timestamp) / 1000);
+    const secondsAgo = Math.floor((now - timestamp) / 1000);
     if (secondsAgo < 60) return 'Just now';
     if (secondsAgo < 3600) return `${Math.floor(secondsAgo / 60)}m ago`;
     if (secondsAgo < 86400) return `${Math.floor(secondsAgo / 3600)}h ago`;
@@ -214,6 +223,14 @@ export const TopBar = React.memo(function TopBar() {
         >
           Active
         </button>
+        <button
+          onClick={() => setShowCompletedGallery(true)}
+          className="completed-button"
+          style={styles.completedButton}
+          title="View your completed patterns"
+        >
+          Completed
+        </button>
 
         {pattern && (
           <span className="topbar-title">
@@ -319,11 +336,7 @@ export const TopBar = React.memo(function TopBar() {
             <div style={styles.separator} />
           </>
         )}
-        <button
-          onClick={() => setShowHelp(true)}
-          style={styles.helpButton}
-          title="How to play"
-        >
+        <button onClick={() => setShowHelp(true)} style={styles.helpButton} title="How to play">
           ?
         </button>
         <AuthButton />
@@ -339,6 +352,12 @@ export const TopBar = React.memo(function TopBar() {
 
       <Suspense fallback={null}>
         {showActivePatterns && <ActivePatternsModal onClose={() => setShowActivePatterns(false)} />}
+      </Suspense>
+
+      <Suspense fallback={null}>
+        {showCompletedGallery && (
+          <CompletedGalleryModal onClose={() => setShowCompletedGallery(false)} />
+        )}
       </Suspense>
 
       <Suspense fallback={null}>
@@ -382,6 +401,16 @@ const styles: Record<string, React.CSSProperties> = {
   activeButton: {
     padding: '0.4rem 0.8rem',
     backgroundColor: '#4A90D9',
+    color: 'white',
+    border: 'none',
+    borderRadius: '0.375rem',
+    cursor: 'pointer',
+    fontWeight: '500',
+    fontSize: '0.85rem',
+  },
+  completedButton: {
+    padding: '0.4rem 0.8rem',
+    backgroundColor: '#2D5A27',
     color: 'white',
     border: 'none',
     borderRadius: '0.375rem',

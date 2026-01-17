@@ -4,13 +4,14 @@ import type { SyncMetadata } from '../types/sync.types';
 import { NO_STITCH } from '../types';
 
 const DB_NAME = 'cross-stitcher-db';
-const DB_VERSION = 5;
+const DB_VERSION = 6;
 
 // Stores
 const PROGRESS_STORE = 'progress';
 const SNAPSHOT_STORE = 'snapshots';
 const PATTERN_STORE = 'patterns';
 const SYNC_META_STORE = 'sync_metadata';
+export const COMPLETED_STORE = 'completed_patterns';
 
 type MaybeArrayBuffer = ArrayBuffer | number[];
 
@@ -59,6 +60,12 @@ export function getDB(): Promise<IDBPDatabase> {
 
         if (!db.objectStoreNames.contains(SYNC_META_STORE)) {
           db.createObjectStore(SYNC_META_STORE, { keyPath: 'patternId' });
+        }
+
+        if (!db.objectStoreNames.contains(COMPLETED_STORE)) {
+          const store = db.createObjectStore(COMPLETED_STORE, { keyPath: 'id' });
+          store.createIndex('byCompletedAt', 'completedAt');
+          store.createIndex('byPatternId', 'patternId');
         }
       },
     });

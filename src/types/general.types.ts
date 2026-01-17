@@ -68,3 +68,15 @@ export interface GridCell {
   col: number;
   row: number;
 }
+
+export interface CompletedPattern {
+  id: string; // Unique ID for the completed pattern record
+  patternId: string; // Original pattern ID (may no longer exist)
+  title: string; // Pattern title
+  width: number;
+  height: number;
+  snapshotDataUrl: string; // Full resolution JPEG as data URL
+  thumbnailDataUrl: string; // Small preview thumbnail
+  completedAt: number; // Epoch milliseconds
+  syncedToRemote: boolean; // Whether it's been uploaded to Supabase
+}
