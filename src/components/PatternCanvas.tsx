@@ -469,12 +469,33 @@ export const PatternCanvas = React.memo(function PatternCanvas() {
     ]
   );
 
-  // Handle wheel zoom
+  // Handle wheel zoom and shift+wheel horizontal pan
   const handleWheel = useCallback(
     (e: React.WheelEvent) => {
       e.preventDefault();
       if (!pattern) return;
 
+      // Shift + mousewheel = horizontal pan
+      if (e.shiftKey) {
+        const panAmount = e.deltaY * 2; // Adjust multiplier for pan speed
+        const newViewport: ViewportTransform = {
+          scale: viewport.scale,
+          translateX: viewport.translateX - panAmount,
+          translateY: viewport.translateY,
+        };
+
+        const clamped = clampViewport(
+          newViewport,
+          pattern.width,
+          pattern.height,
+          size.width,
+          size.height
+        );
+        setViewport(clamped);
+        return;
+      }
+
+      // Regular mousewheel = zoom
       const rect = canvasRef.current?.getBoundingClientRect();
       if (!rect) return;
 
