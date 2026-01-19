@@ -28,8 +28,8 @@
  * The index is NOT persisted - it is rebuilt from pattern + progress on load.
  */
 
-import type { PatternDoc, UserProgress, GridCell } from '../types';
-import { StitchState, NO_STITCH } from '../types';
+import type { GridCell, PatternDoc, UserProgress } from '../types';
+import { NO_STITCH, StitchState } from '../types';
 
 /** Tile size for spatial bucketing. 32x32 is a good balance of memory vs lookup speed. */
 export const TILE_SIZE = 32;
@@ -303,5 +303,57 @@ export class UnstitchedIndex {
     for (const cellIndex of cellIndices) {
       this.markStitched(cellIndex, paletteIndex);
     }
+  }
+
+  /**
+   * Check if there are any unstitched cells for a given palette color
+   * visible within the specified viewport bounds.
+   *
+   * @param paletteIndex - The palette color to check
+   * @param minCol - Left boundary of visible area (inclusive)
+   * @param maxCol - Right boundary of visible area (inclusive)
+   * @param minRow - Top boundary of visible area (inclusive)
+   * @param maxRow - Bottom boundary of visible area (inclusive)
+   * @returns true if at least one unstitched cell is visible, false otherwise
+   */
+  hasVisibleUnstitched(
+    paletteIndex: number,
+    minCol: number,
+    maxCol: number,
+    minRow: number,
+    maxRow: number
+  ): boolean {
+    if (paletteIndex < 0 || paletteIndex >= this.colorIndices.length) return false;
+
+    const colorIndex = this.colorIndices[paletteIndex];
+    if (colorIndex.unstitchedPositions.size === 0) return false;
+
+    // Calculate which tiles overlap with the visible bounds
+    const minTileCol = Math.floor(minCol / TILE_SIZE);
+    const maxTileCol = Math.floor(maxCol / TILE_SIZE);
+    const minTileRow = Math.floor(minRow / TILE_SIZE);
+    const maxTileRow = Math.floor(maxRow / TILE_SIZE);
+
+    // Check each tile in the visible range
+    for (let tileRow = minTileRow; tileRow <= maxTileRow; tileRow++) {
+      for (let tileCol = minTileCol; tileCol <= maxTileCol; tileCol++) {
+        const tileId = tileRow * this.tilesPerRow + tileCol;
+        const positionsInTile = colorIndex.tileIndex.get(tileId);
+
+        if (!positionsInTile || positionsInTile.size === 0) continue;
+
+        // Check if any cell in this tile is actually within the visible bounds
+        for (const pos of positionsInTile) {
+          const col = colorIndex.targetCols[pos];
+          const row = colorIndex.targetRows[pos];
+
+          if (col >= minCol && col <= maxCol && row >= minRow && row <= maxRow) {
+            return true;
+          }
+        }
+      }
+    }
+
+    return false;
   }
 }

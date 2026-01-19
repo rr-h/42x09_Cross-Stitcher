@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { uploadCompletedPattern } from '../sync/completedPatternSync';
 import { loadLatestRemoteSnapshot } from '../sync/remoteSnapshots';
 import type {
   GridCell,
@@ -9,11 +10,11 @@ import type {
   ViewportTransform,
 } from '../types';
 import { NO_STITCH, StitchState } from '../types';
+import { getViewportCenterInGrid, getVisibleGridBounds } from '../utils/coordinates';
 import { chooseBestProgress } from '../utils/progressScoring';
 import { UnstitchedIndex } from '../utils/UnstitchedIndex';
-import { loadProgress, savePattern, saveProgress, cleanupPatternProgress } from './persistence';
 import { captureCompletedPattern, saveCompletedPattern } from './completedPatterns';
-import { uploadCompletedPattern } from '../sync/completedPatternSync';
+import { cleanupPatternProgress, loadProgress, savePattern, saveProgress } from './persistence';
 
 /**
  * Debounced saveProgress to reduce IndexedDB write frequency.
@@ -41,6 +42,60 @@ function debouncedSaveProgress(progress: UserProgress, delayMs: number = 500): v
     }
     saveProgressTimeoutId = null;
   }, delayMs);
+}
+
+/**
+ * Helper function to check if auto-navigation should trigger after placing a stitch.
+ * Returns the cell to navigate to, or null if no navigation is needed.
+ */
+function checkAutoNavigation(
+  paletteIndex: number,
+  unstitchedIndex: UnstitchedIndex | null,
+  viewport: ViewportTransform,
+  pattern: PatternDoc,
+  remainingTargets: number
+): number | null {
+  // Don't auto-navigate if this color is complete
+  if (remainingTargets === 0) return null;
+
+  // Don't auto-navigate if no index available
+  if (!unstitchedIndex) return null;
+
+  // Get canvas size from DOM (same approach as Palette component)
+  const canvasContainer = document.querySelector('[data-canvas-container]');
+  const canvasWidth = canvasContainer?.clientWidth || 800;
+  const canvasHeight = canvasContainer?.clientHeight || 600;
+
+  // Calculate visible grid bounds
+  const bounds = getVisibleGridBounds(
+    canvasWidth,
+    canvasHeight,
+    viewport,
+    pattern.width,
+    pattern.height
+  );
+
+  // Check if there are any unstitched cells of this color still visible
+  const hasVisibleUnstitched = unstitchedIndex.hasVisibleUnstitched(
+    paletteIndex,
+    bounds.minCol,
+    bounds.maxCol,
+    bounds.minRow,
+    bounds.maxRow
+  );
+
+  // If there are still visible unstitched cells, don't navigate
+  if (hasVisibleUnstitched) return null;
+
+  // No visible unstitched cells - find the nearest one and navigate to it
+  const viewportCenter = getViewportCenterInGrid(canvasWidth, canvasHeight, viewport);
+  const nearest = unstitchedIndex.findNearest(paletteIndex, viewportCenter.col, viewportCenter.row);
+
+  if (nearest) {
+    return nearest.row * pattern.width + nearest.col;
+  }
+
+  return null;
 }
 
 /**
@@ -237,7 +292,7 @@ export const useGameStore = create<GameState>((set, get) => {
 
     placeStitch: (col: number, row: number) => {
       touch();
-      const { pattern, progress, selectedPaletteIndex, unstitchedIndex } = get();
+      const { pattern, progress, selectedPaletteIndex, unstitchedIndex, viewport } = get();
       if (!pattern || !progress || selectedPaletteIndex === null) return;
 
       const cellIndex = row * pattern.width + col;
@@ -293,6 +348,22 @@ export const useGameStore = create<GameState>((set, get) => {
         showCelebration: isNowComplete && !wasComplete,
       });
 
+      // Check for auto-navigation if the stitch was correct
+      if (isCorrect && !isNowComplete) {
+        const navCellIndex = checkAutoNavigation(
+          selectedPaletteIndex,
+          unstitchedIndex,
+          viewport,
+          pattern,
+          newPaletteCounts[selectedPaletteIndex].remainingTargets
+        );
+
+        if (navCellIndex !== null) {
+          // Trigger navigation using the existing navigateToCell mechanism
+          get().navigateToCell(navCellIndex, { animate: true });
+        }
+      }
+
       // Don't auto-delete on completion - let user manually dismiss celebration
       // Pattern will be cleaned up when user clicks "Done" in celebration modal
       if (!isNowComplete || wasComplete) {
@@ -303,7 +374,7 @@ export const useGameStore = create<GameState>((set, get) => {
 
     floodFillStitch: (col: number, row: number) => {
       touch();
-      const { pattern, progress, selectedPaletteIndex, unstitchedIndex } = get();
+      const { pattern, progress, selectedPaletteIndex, unstitchedIndex, viewport } = get();
       if (!pattern || !progress || selectedPaletteIndex === null) return;
 
       const startIndex = row * pattern.width + col;
@@ -388,6 +459,22 @@ export const useGameStore = create<GameState>((set, get) => {
         isComplete: isNowComplete,
         showCelebration: isNowComplete && !wasComplete,
       });
+
+      // Check for auto-navigation after flood fill
+      if (!isNowComplete) {
+        const navCellIndex = checkAutoNavigation(
+          selectedPaletteIndex,
+          unstitchedIndex,
+          viewport,
+          pattern,
+          newPaletteCounts[selectedPaletteIndex].remainingTargets
+        );
+
+        if (navCellIndex !== null) {
+          // Trigger navigation using the existing navigateToCell mechanism
+          get().navigateToCell(navCellIndex, { animate: true });
+        }
+      }
 
       // Don't auto-delete on completion - let user manually dismiss celebration
       // Pattern will be cleaned up when user clicks "Done" in celebration modal
